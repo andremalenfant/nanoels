@@ -39,9 +39,9 @@ const long STEP_TIME_MS = 500; // Time in milliseconds it should take to make 1 
 const long DELAY_BETWEEN_STEPS_MS = 80; // Time in milliseconds to wait between steps.
 
 // Connect to WiFi and expose web UI to control and receive GCode.
-const bool WIFI_ENABLED = true;
-const char* SSID = "your-wifi-name";
-const char* PASSWORD = "your-password";
+const bool WIFI_ENABLED = false;
+const char* SSID = "Wanda2G";
+const char* PASSWORD = "jetpet22";
 const long INCOMING_BUFFER_SIZE = 100000;
 const long OUTGOING_BUFFER_SIZE = 100000;
 
@@ -1678,6 +1678,7 @@ void updateDisplay() {
     }
 
     setText("t3", result);
+    setText("t4", String(rpm) + " RPM");
   }
 }
 
@@ -3574,6 +3575,28 @@ void applySettings() {
   }
 }
 
+void taskDisplayRead(void *param) {
+  byte buffer[20];
+  int bufferIndex = 0;
+  while (emergencyStop == ESTOP_NONE) {
+    while (Serial1.available()) {
+      int bytesRead = Serial1.readBytesUntil(0xFF, buffer, sizeof(buffer) - 1);
+
+      if (bytesRead >= 2) {
+        if (buffer[0] == 0x98) {
+          processNumpad(B_ON);
+        } else if (buffer[0] == 0x99) {
+          wsKeycode = buffer[1];
+          if (wsKeycode > 0)
+            processKeypadEvent();
+        }
+      }      
+    }
+    taskYIELD();
+  }
+  vTaskDelete(NULL);
+}
+
 void setup() {
   pinMode(ENC_A, INPUT_PULLUP);
   pinMode(ENC_B, INPUT_PULLUP);
@@ -3672,6 +3695,7 @@ void setup() {
   if (y.active) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   xTaskCreatePinnedToCore(taskGcode, "taskGcode", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   if (WIFI_ENABLED) xTaskCreatePinnedToCore(taskWiFi, "taskWiFI", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  xTaskCreatePinnedToCore(taskDisplayRead, "taskDisplayRead", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
 }
 
 void loop() {
