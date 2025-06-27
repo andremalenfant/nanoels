@@ -14,7 +14,7 @@ const int ENCODER_BACKLASH = 0; // Numer of impulses encoder can issue without m
 #define ENC_A 13
 #define ENC_B 14
 
-const bool KEYBOARD_ENABLED = true;
+//#define KEYBOARD_ENABLED
 
 const long MOTOR_SCREW_RATIO_Z = 3;
 
@@ -252,7 +252,9 @@ struct CircleBuffer {
 #include <WebSocketsServer.h> // install via Libraries as "WebSockets"
 #include <driver/pcnt.h>
 #include <Preferences.h>
-#include <PS2KeyAdvanced.h> // install via Libraries as "PS2KeyAdvanced"
+#ifdef KEYBAORD_ENABLED
+  #include <PS2KeyAdvanced.h> // install via Libraries as "PS2KeyAdvanced"
+#endif
 #include <Update.h>
 #include <SPIFFS.h>
 #include "esp_wifi.h"
@@ -3100,11 +3102,15 @@ void processKeypadEvent() {
   if (wsKeycode != 0) {
     event = wsKeycode;
     wsKeycode = 0;
-  } else if (KEYBOARD_ENABLED) {
+  } 
+  #ifdef KEYBOARD_ENABLED
+    else {
     if (keyboard.available()) {
       event = keyboard.read();
     }
   }
+  #endif
+
   if (event == 0) return;
   int keyCode = event & 0xFF;
   bool isPress = !(event & PS2_BREAK);
@@ -3114,10 +3120,12 @@ void processKeypadEvent() {
   //setText("t0", (isPress ? "Press " : "Release ") + String(keyCode));
 
   // Some keyboards send this code and expect an answer to initialize.
-  if (KEYBOARD_ENABLED && keyCode == 170) {
+  #ifdef KEYBOARD_ENABLED
+  if (keyCode == 170) {
     keyboard.echo();
     return;
   }
+  #endif
 
   // Off button always gets handled.
   if (keyCode == B_OFF) {
@@ -3876,10 +3884,10 @@ void setup() {
   Serial1.begin(NEXTION_BAUDRATE, SERIAL_8N1, 44, 43);
 
   // Initialize the keyboard.
-  if (KEYBOARD_ENABLED) {
+  #ifdef KEYBOARD_ENABLED
     keyboard.begin(KEY_DATA, KEY_CLOCK);
     xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  }
+  #endif
 
   // Non-time-sensitive tasks on core 0.
   delay(1300); // Nextion needs time to boot or first display update will be ignored.
