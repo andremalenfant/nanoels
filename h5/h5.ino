@@ -1,25 +1,33 @@
 // https://github.com/kachurovskiy/nanoels
 
+#define NEXTION_BAUDRATE 115200
+//#define NEXTION_BAUDRATE 250000
+//#define NEXTION_BAUDRATE 921600
+
 /* Change values in this section to suit your hardware. */
 
 // Define your hardware parameters here.
-const int ENCODER_PPR = 1200; // 1200 step spindle optical rotary encoder. Fractional values not supported.
-const int ENCODER_BACKLASH = 3; // Numer of impulses encoder can issue without movement of the spindle
+const int ENCODER_PPR = 600; // 1200 step spindle optical rotary encoder. Fractional values not supported.
+const int ENCODER_BACKLASH = 0; // Numer of impulses encoder can issue without movement of the spindle
 
 // Spindle rotary encoder pins. Swap values if the rotation direction is wrong.
 #define ENC_A 13
 #define ENC_B 14
 
+const bool KEYBOARD_ENABLED = true;
+
+const long MOTOR_SCREW_RATIO_Z = 3;
+
 // Main lead screw (Z) parameters.
-const long SCREW_Z_DU = 40000; // 4mm SFU1204 ball screw in deci-microns (10^-7 of a meter)
+const long SCREW_Z_DU = 20000 / MOTOR_SCREW_RATIO_Z; // 2mm --4mm SFU1204 ball screw in deci-microns (10^-7 of a meter)
 const long MOTOR_STEPS_Z = 800;
 const long SPEED_START_Z = MOTOR_STEPS_Z; // Initial speed of a motor, steps / second.
-const long ACCELERATION_Z = 25 * MOTOR_STEPS_Z; // Acceleration of a motor, steps / second ^ 2.
-const long SPEED_MANUAL_MOVE_Z = 8 * MOTOR_STEPS_Z; // Maximum speed of a motor during manual move, steps / second.
+const long ACCELERATION_Z = 12 * MOTOR_STEPS_Z; // Acceleration of a motor, steps / second ^ 2.
+const long SPEED_MANUAL_MOVE_Z = 6 * MOTOR_STEPS_Z; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_Z = false; // change (true/false) if the carriage moves e.g. "left" when you press "right".
 const bool NEEDS_REST_Z = false; // Set to false for closed-loop drivers, true for open-loop.
 const long MAX_TRAVEL_MM_Z = 300; // Lathe bed doesn't allow to travel more than this in one go, 30cm / ~1 foot
-const long BACKLASH_DU_Z = 0; // 0mm backlash in deci-microns (10^-7 of a meter)
+const long BACKLASH_DU_Z = 2; // 0mm backlash in deci-microns (10^-7 of a meter)
 const char NAME_Z = 'Z'; // Text shown on screen before axis position value, GCode axis name
 
 // Cross-slide lead screw (X) parameters.
@@ -39,7 +47,7 @@ const long STEP_TIME_MS = 500; // Time in milliseconds it should take to make 1 
 const long DELAY_BETWEEN_STEPS_MS = 80; // Time in milliseconds to wait between steps.
 
 // Connect to WiFi and expose web UI to control and receive GCode.
-const bool WIFI_ENABLED = false;
+const bool WIFI_ENABLED = true;
 const char* SSID = "Wanda2G";
 const char* PASSWORD = "jetpet22";
 const long INCOMING_BUFFER_SIZE = 100000;
@@ -65,7 +73,7 @@ const char NAME_Y = 'Y'; // Text shown on screen before axis position value, GCo
 // Manual handwheels. Ignore if you don't have them installed.
 const float PULSE_PER_REVOLUTION = 600; // PPR of handwheels.
 
-const int ENCODER_STEPS_INT = ENCODER_PPR * 2; // Number of encoder impulses PCNT counts per revolution of the spindle
+const int ENCODER_STEPS_INT = ENCODER_PPR * 4; // Number of encoder impulses PCNT counts per revolution of the spindle (encoder steps * pulley ratio)
 const int ENCODER_FILTER = 1; // Encoder pulses shorter than this will be ignored. Clock cycles, 1 - 1023.
 const int PCNT_LIM = 31000; // Limit used in hardware pulse counter logic.
 const int PCNT_CLEAR = 30000; // Limit where we reset hardware pulse counter value to avoid overflow. Less than PCNT_LIM.
@@ -245,6 +253,9 @@ struct CircleBuffer {
 #include <driver/pcnt.h>
 #include <Preferences.h>
 #include <PS2KeyAdvanced.h> // install via Libraries as "PS2KeyAdvanced"
+#include <Update.h>
+#include <SPIFFS.h>
+#include "esp_wifi.h"
 
 const char indexhtml[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -408,6 +419,18 @@ const char indexhtml[] PROGMEM = R"rawliteral(
     <li><code>~</code> turns the controller on</li>
     <li><code>""</code> removes all GCode</li>
   </ul>
+    <p id="free-space"></p>
+  <h2>Upload Screen Firmware</h2>
+  <form enctype="multipart/form-data" method="post" name="tftForm" id="tftForm">
+    <input type="file" name="tftFile" id="tftFile" accept=".tft" required />
+    <button id="sendTft">Send</button>
+  </form>
+    <p id="free-space"></p>
+  <h2>Upload MCU Firmware</h2>
+  <form enctype="multipart/form-data" method="post" name="sketchForm" id="binForm">
+    <input type="file" name="binFile" id="binFile" accept=".bin" required />
+    <button id="sendBin">Send</button>
+  </form>
 
   <script>
     const log = document.getElementById('log');
@@ -418,6 +441,8 @@ const char indexhtml[] PROGMEM = R"rawliteral(
     const gcodeContentInput = document.getElementById('gcode-content');
     const addGcodeButton = document.getElementById('add-gcode');
     const removeCommentsCheckbox = document.getElementById('remove-comments');
+    const addTftButton = document.getElementById('sendTft');
+    const addBinButton = document.getElementById('sendBin');
 
     const ws = new WebSocket(`ws://${window.location.host.split(':')[0]}:81`);
 
@@ -576,6 +601,30 @@ const char indexhtml[] PROGMEM = R"rawliteral(
       log.scrollTop = log.scrollHeight;
     }
 
+    addTftButton.addEventListener('click', () => {
+      const formData = new FormData(document.getElementById('tftForm'));
+      fetch("/uploadTft", {
+        method: "POST",
+        body: formData,
+        headers: {
+          "tft-file-size": document.getElementById('tftFile').files[0].size,
+        },
+      });
+      event.preventDefault();
+    });
+
+    addBinButton.addEventListener('click', () => {
+      const formData = new FormData(document.getElementById('binForm'));
+      fetch("/uploadBin", {
+        method: "POST",
+        body: formData,
+        headers: {
+          "bin-file-size": document.getElementById('binFile').files[0].size,
+        },
+      });
+      event.preventDefault();
+    });
+
     listGcodes();
   </script>
 </body>
@@ -604,6 +653,7 @@ long lcdHashLine0 = LCD_HASH_INITIAL;
 long lcdHashLine1 = LCD_HASH_INITIAL;
 long lcdHashLine2 = LCD_HASH_INITIAL;
 long lcdHashLine3 = LCD_HASH_INITIAL;
+int lastRpm = -1;
 bool splashScreen = false;
 
 unsigned long keypadTimeUs = 0;
@@ -641,6 +691,8 @@ int starts = 1; // number of starts in a multi-start thread
 int savedStarts = 0; // starts saved in Preferences
 int nextStarts = starts; // number of starts that should be used asap
 bool nextStartsFlag = false; // whether nextStarts requires attention
+
+TaskHandle_t taskDisplayHandle = NULL;
 
 struct Axis {
   SemaphoreHandle_t mutex;
@@ -1063,7 +1115,48 @@ void handleStatus() {
   server.send(200, "text/plain", "LittleFS.freeSpace=" + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + "\n");
 }
 
+const String wl_status_to_string(wl_status_t status) {
+  switch (status) {
+    case WL_NO_SHIELD: return "WL_NO_SHIELD";
+    case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
+    case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
+    case WL_SCAN_COMPLETED: return "WL_SCAN_COMPLETED";
+    case WL_CONNECTED: return "WL_CONNECTED";
+    case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
+    case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+    case WL_DISCONNECTED: return "WL_DISCONNECTED";
+  }
+}
+
+void toScreen(const String &command) {
+  Serial1.print(command);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF);
+  Serial1.write(0xFF);
+}
+
+void setText(const String &id, const String &text) {
+  toScreen(id + ".txt=\"" + text + "\"");
+}
+
+String uploadProgress = "";
+
 void taskWiFi(void *param) {
+  
+  esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+  // Set Wi-Fi region to US
+  wifi_country_t country = {
+    .cc = "CA",
+    .schan = 1,
+    .nchan = 165,
+    .policy = WIFI_COUNTRY_POLICY_MANUAL
+  };
+  esp_wifi_set_country(&country);
+
+  // Force b/g/n only (ESP32-S3 supports up to WiFi 4)
+  //esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+  
+  WiFi.hostname("nanoELS");
   WiFi.begin(SSID, PASSWORD);
   wifiStatus = "Connecting to WiFi";
   for (int i = 0; i < 40; i++) {
@@ -1081,7 +1174,7 @@ void taskWiFi(void *param) {
     } else if (WiFi.status() == WL_DISCONNECTED) {
       wifiStatus = "WiFi disconnected"; // Likely wrong password
     } else {
-      wifiStatus = "WiFi unknown error";
+      wifiStatus = String(wl_status_to_string(WiFi.status()));
     }
     vTaskDelete(NULL);
     return;
@@ -1097,8 +1190,90 @@ void taskWiFi(void *param) {
   server.on("/gcode/get", HTTP_GET, handleGcodeGet);
   server.on("/gcode/remove", HTTP_POST, handleGcodeRemove);
   server.on("/status", HTTP_GET, handleStatus);
+  server.on("/uploadTft", HTTP_POST, 
+      []() {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/plain", "OK");
+      },
+      []() {
+        byte resBuffer[3];
+        HTTPUpload &upload = server.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+          vTaskSuspend(taskDisplayHandle);
+          String size = server.header("Tft-File-Size");
+          toScreen("whmi-wri " + size + "," + String(NEXTION_BAUDRATE) + ",0");
+          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+        } else if (upload.status == UPLOAD_FILE_WRITE) {  
+          Serial1.write(upload.buf, upload.currentSize);
+          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+        } else if (upload.status == UPLOAD_FILE_END) {
+          Serial1.readBytesUntil(0x88, resBuffer, sizeof(resBuffer) - 1);
+          vTaskResume(taskDisplayHandle);
+        }
+      }
+    );
+  server.on("/uploadBin", HTTP_POST,
+    [&]() {
+      // handler when file upload finishes
+      if (Update.hasError()) {
+        server.send(200, F("text/html"), String(F("<META http-equiv=\"refresh\" content=\"5;URL=/\">Update error: ")) + String(Update.errorString()));
+      } else {
+        server.client().setNoDelay(true);
+        server.send(200, PSTR("text/html"), String(F("<META http-equiv=\"refresh\" content=\"15;URL=/\">Update Success! Rebooting...")));
+        delay(100);
+        server.client().stop();
+        ESP.restart();
+      }
+    },
+    [&]() {
+      // handler for the file upload, gets the sketch bytes, and writes
+      // them through the Update object
+      HTTPUpload &upload = server.upload();
+      if (upload.status == UPLOAD_FILE_START) {
+        vTaskSuspend(taskDisplayHandle);
+        setText("t2", "Uploading " + upload.filename);
+        if (upload.name == "filesystem") {
+          if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {  //start with max available size
+            setText("t2", "upload error");
+          }
+        } else {
+          uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+          if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
+            setText("t2", "upload error");
+          }
+        }
+      } else if (upload.status == UPLOAD_FILE_ABORTED || Update.hasError()) {
+        if (upload.status == UPLOAD_FILE_ABORTED) {
+          if (!Update.end(false)) {
+            setText("t2", "upload error");
+          }
+          setText("t2", "upload aborted");
+        }
+        uploadProgress = "";
+        vTaskResume(taskDisplayHandle);
+      } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (uploadProgress.length() >= 20)
+          uploadProgress = "";
+        uploadProgress += ".";
+        setText("t3", uploadProgress);
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+          setText("t2", "upload write error");
+        }
+      } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {  //true to set the size to the current progress
+          setText("t2", "Update Success. Rebooting...");
+        } else {
+          setText("t2", "upload write end error");
+        }
+        uploadProgress = "";
+        vTaskResume(taskDisplayHandle);
+      }
+      delay(0);
+    }
+  );
+  
+  server.collectAllHeaders();
   server.begin();
-
   webSocket.begin();
   webSocket.onEvent(handleWebSocketEvent);
 
@@ -1254,17 +1429,6 @@ int getApproxRpm() {
 
 bool stepperIsRunning(Axis* a) {
   return micros() - a->stepStartUs < 50000;
-}
-
-void toScreen(const String &command) {
-  Serial1.print(command);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF);
-  Serial1.write(0xFF);
-}
-
-void setText(const String &id, const String &text) {
-  toScreen(id + ".txt=\"" + text + "\"");
 }
 
 // Returns number of letters printed.
@@ -1678,7 +1842,11 @@ void updateDisplay() {
     }
 
     setText("t3", result);
-    setText("t4", String(rpm) + " RPM");
+  }
+  int newRpm = getApproxRpm();
+  if (newRpm != lastRpm) {
+    setText("t4", String(getApproxRpm()) + " RPM");
+    lastRpm = newRpm;
   }
 }
 
@@ -1733,44 +1901,6 @@ bool saveIfChanged() {
 
 void beep() {
   // TODO
-}
-
-void taskDisplay(void *param) {
-  while (emergencyStop == ESTOP_NONE) {
-    updateDisplay();
-    // Calling Preferences.commit() blocks all interrupts for 30ms, don't call saveIfChanged() if
-    // encoder is likely to move soon.
-    unsigned long now = micros();
-    if (!stepperIsRunning(&z) && !stepperIsRunning(&x) && (now > spindleEncTime + SAVE_DELAY_US) && (now < saveTime || now > saveTime + SAVE_DELAY_US) && (now < keypadTimeUs || now > keypadTimeUs + SAVE_DELAY_US)) {
-      if (saveIfChanged()) {
-        saveTime = now;
-      }
-    }
-    if (beepFlag) {
-      beepFlag = false;
-      beep();
-    }
-    if (abs(z.pendingPos) > z.estopSteps || abs(x.pendingPos) > x.estopSteps) {
-      setEmergencyStop(ESTOP_POS);
-    }
-    taskYIELD();
-  }
-  screenClear();
-  setText("t0", "EMERGENCY STOP");
-  if (emergencyStop == ESTOP_POS) {
-    setText("t2", "Requested position");
-    setText("t3", "outside machine");
-  } else if (emergencyStop == ESTOP_MARK_ORIGIN) {
-    setText("t1", "Unable to");
-    setText("t2", "mark origin");
-  } else if (emergencyStop == ESTOP_ON_OFF) {
-    setText("t0", "Unable to");
-    setText("t1", "turn on/off");
-  } else if (emergencyStop == ESTOP_OFF_MANUAL_MOVE) {
-    setText("t1", "Off during");
-    setText("t2", "manual move");
-  }
-  vTaskDelete(NULL);
 }
 
 void setMeasure(int value) {
@@ -2426,9 +2556,9 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcntConfig.channel = PCNT_CHANNEL_0;
   pcntConfig.unit = unit;
   pcntConfig.pos_mode = PCNT_COUNT_INC;
-  pcntConfig.neg_mode = PCNT_COUNT_DEC;
-  pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
-  pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.neg_mode = PCNT_COUNT_DIS;
+  pcntConfig.lctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.hctrl_mode = PCNT_MODE_REVERSE;
   pcntConfig.counter_h_lim = PCNT_LIM;
   pcntConfig.counter_l_lim = -PCNT_LIM;
   pcnt_unit_config(&pcntConfig);
@@ -2627,7 +2757,7 @@ void buttonPlusMinusPress(bool plus) {
       setTurnPasses(turnPasses + 1);
     }
   } else if (measure != MEASURE_TPI) {
-    int delta = measure == MEASURE_METRIC ? MOVE_STEP_3 : MOVE_STEP_IMP_3;
+    int delta = moveStep;//measure == MEASURE_METRIC ? MOVE_STEP_3 : MOVE_STEP_IMP_3;
     // Switching between mm/inch/tpi often results in getting non-0 3rd and 4th
     // precision points that can't be easily controlled. Remove them.
     long normalizedDupr = normalizePitch(dupr);
@@ -2789,16 +2919,20 @@ void buttonReversePress() {
   setDupr(-dupr);
 }
 
+void numpadRotateDigit() {
+  if (numpadIndex < 7) {
+    numpadIndex++;
+  } else {
+    numpadIndex = 0;
+  }  
+}
+
 void numpadPress(int digit) {
   if (!inNumpad) {
     numpadIndex = 0;
   }
   numpadDigits[numpadIndex] = digit;
-  if (numpadIndex < 7) {
-    numpadIndex++;
-  } else {
-    numpadIndex = 0;
-  }
+  numpadRotateDigit();
 }
 
 void numpadBackspace() {
@@ -2966,8 +3100,10 @@ void processKeypadEvent() {
   if (wsKeycode != 0) {
     event = wsKeycode;
     wsKeycode = 0;
-  } else if (keyboard.available()) {
-    event = keyboard.read();
+  } else if (KEYBOARD_ENABLED) {
+    if (keyboard.available()) {
+      event = keyboard.read();
+    }
   }
   if (event == 0) return;
   int keyCode = event & 0xFF;
@@ -2975,10 +3111,10 @@ void processKeypadEvent() {
   keypadTimeUs = micros();
 
   // Uncomment the line below to see the key codes on screen.
-  // setText("t0", (isPress ? "Press " : "Release ") + String(keyCode));
+  //setText("t0", (isPress ? "Press " : "Release ") + String(keyCode));
 
   // Some keyboards send this code and expect an answer to initialize.
-  if (keyCode == 170) {
+  if (KEYBOARD_ENABLED && keyCode == 170) {
     keyboard.echo();
     return;
   }
@@ -3492,16 +3628,16 @@ void processSpindleCounter() {
   }
 
   unsigned long microsNow = micros();
-  if (showTacho || mode == MODE_GCODE) {
+  //if (showTacho || mode == MODE_GCODE) {
     if (spindleEncTimeIndex >= RPM_BULK) {
       spindleEncTimeDiffBulk = microsNow - spindleEncTimeAtIndex0;
       spindleEncTimeAtIndex0 = microsNow;
       spindleEncTimeIndex = 0;
     }
     spindleEncTimeIndex += abs(delta);
-  } else {
+  /*} else {
     spindleEncTimeDiffBulk = 0;
-  }
+  }*/
 
   spindlePos += delta;
   spindlePosGlobal += delta;
@@ -3575,24 +3711,81 @@ void applySettings() {
   }
 }
 
-void taskDisplayRead(void *param) {
+// read touch screen
+void readTouch() {
   byte buffer[20];
-  int bufferIndex = 0;
-  while (emergencyStop == ESTOP_NONE) {
-    while (Serial1.available()) {
-      int bytesRead = Serial1.readBytesUntil(0xFF, buffer, sizeof(buffer) - 1);
+  if (Serial1.available()) {
+    int bytesRead = Serial1.readBytesUntil(0xFF, buffer, sizeof(buffer) - 1);
 
-      if (bytesRead >= 2) {
-        if (buffer[0] == 0x98) {
-          processNumpad(B_ON);
-        } else if (buffer[0] == 0x99) {
-          wsKeycode = buffer[1];
-          if (wsKeycode > 0)
-            processKeypadEvent();
-        }
-      }      
+    if (bytesRead >= 2) {
+      switch(buffer[0]) {
+      case 0x97:  
+        switch(buffer[1]) {
+          case 0x00:
+            buttonMoveStepPress();
+            break;
+          case 0x01:
+            buttonPlusMinusPress(true);
+            break;
+          case 0x02:
+            buttonPlusMinusPress(false);
+            break;
+        }    
+        break;
+      case 0x98:
+        processNumpad(B_ON);
+        break;
+      case 0x99:
+      //setText("t4",String(bytesRead));
+        if (bytesRead > 2 && buffer[2] == 0x01)
+          wsKeycode = buffer[1] | PS2_BREAK; // add break bit if key release
+        else
+          wsKeycode = buffer[1]; 
+        if (wsKeycode > 0)
+          processKeypadEvent();
+        break;
+      }
+    }      
+  }  
+}
+
+void taskDisplay(void *param) {
+  while (emergencyStop == ESTOP_NONE) {
+    updateDisplay();
+    // Calling Preferences.commit() blocks all interrupts for 30ms, don't call saveIfChanged() if
+    // encoder is likely to move soon.
+    unsigned long now = micros();
+    if (!stepperIsRunning(&z) && !stepperIsRunning(&x) && (now > spindleEncTime + SAVE_DELAY_US) && (now < saveTime || now > saveTime + SAVE_DELAY_US) && (now < keypadTimeUs || now > keypadTimeUs + SAVE_DELAY_US)) {
+      if (saveIfChanged()) {
+        saveTime = now;
+      }
     }
+    if (beepFlag) {
+      beepFlag = false;
+      beep();
+    }
+    if (abs(z.pendingPos) > z.estopSteps || abs(x.pendingPos) > x.estopSteps) {
+      setEmergencyStop(ESTOP_POS);
+    }
+
+    readTouch();
+    
     taskYIELD();
+  }
+  screenClear();
+  setText("t0", "EMERGENCY STOP");
+  if (emergencyStop == ESTOP_POS) {
+    setText("t2", "Requested position");
+    setText("t3", "outside machine");
+  } else if (emergencyStop == ESTOP_MARK_ORIGIN) {
+    setText("t1", "Unable to");
+    setText("t2", "mark origin");
+  } else if (emergencyStop == ESTOP_ON_OFF) {
+    setText("t0", "Unable to");
+    setText("t1", "turn on/off");
+  } else if (emergencyStop == ESTOP_OFF_MANUAL_MOVE) {
+    setText("t1", "Off during");
+    setText("t2", "manual move");
   }
   vTaskDelete(NULL);
 }
@@ -3677,25 +3870,26 @@ void setup() {
   }
 
   // Debug.
-  Serial.begin(115200);
+  Serial.begin(NEXTION_BAUDRATE);
 
   // Nextion.
-  Serial1.begin(115200, SERIAL_8N1, 44, 43);
+  Serial1.begin(NEXTION_BAUDRATE, SERIAL_8N1, 44, 43);
 
   // Initialize the keyboard.
-  keyboard.begin(KEY_DATA, KEY_CLOCK);
-  xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  if (KEYBOARD_ENABLED) {
+    keyboard.begin(KEY_DATA, KEY_CLOCK);
+    xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  }
 
   // Non-time-sensitive tasks on core 0.
   delay(1300); // Nextion needs time to boot or first display update will be ignored.
   xTaskCreatePinnedToCore(taskAttachInterrupts, "taskAttachInterrupts", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  xTaskCreatePinnedToCore(taskDisplay, "taskDisplay", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  xTaskCreatePinnedToCore(taskMoveZ, "taskMoveZ", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  xTaskCreatePinnedToCore(taskMoveX, "taskMoveX", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  if (y.active) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  xTaskCreatePinnedToCore(taskDisplay, "taskDisplay", 10000 /* stack size */, NULL, 0 /* priority */, &taskDisplayHandle, 0 /* core */);
+  xTaskCreatePinnedToCore(taskMoveZ, "taskMoveZ", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 1 /* core */);
+  xTaskCreatePinnedToCore(taskMoveX, "taskMoveX", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 1 /* core */);
+  if (y.active) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 1 /* core */);
   xTaskCreatePinnedToCore(taskGcode, "taskGcode", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   if (WIFI_ENABLED) xTaskCreatePinnedToCore(taskWiFi, "taskWiFI", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  xTaskCreatePinnedToCore(taskDisplayRead, "taskDisplayRead", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
 }
 
 void loop() {
