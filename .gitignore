@@ -3,3 +3,5 @@
 */esp32s3.svd
 h4/single_axis_manual*
 **/*.FCStd1
+/h5/.vscode
+/h5/build
