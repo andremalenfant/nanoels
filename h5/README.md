@@ -1,3 +1,11 @@
+Fork including:
+
+- Touch Screen
+- Yellow background (a tribute to H4's design)
+- Encoder to replace 0-9 and + - Enter, etc. to gain screen real estate
+
+
+
 # NanoEls H5
 
 Latest version of the electronic lead screw controller for metal lathes.
