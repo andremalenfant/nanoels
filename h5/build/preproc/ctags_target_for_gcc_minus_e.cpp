@@ -26,6 +26,7 @@ const long SPEED_START_Z = MOTOR_STEPS_Z; // Initial speed of a motor, steps / s
 const long ACCELERATION_Z = 12 * MOTOR_STEPS_Z; // Acceleration of a motor, steps / second ^ 2.
 const long SPEED_MANUAL_MOVE_Z = 6 * MOTOR_STEPS_Z; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_Z = false; // change (true/false) if the carriage moves e.g. "left" when you press "right".
+const bool INVERT_Z_ENABLE = false; // change (true/false) if the Z axis enable pin is inverted
 const bool NEEDS_REST_Z = false; // Set to false for closed-loop drivers, true for open-loop.
 const long MAX_TRAVEL_MM_Z = 300; // Lathe bed doesn't allow to travel more than this in one go, 30cm / ~1 foot
 const long BACKLASH_DU_Z = 2; // 0mm backlash in deci-microns (10^-7 of a meter)
@@ -38,6 +39,7 @@ const long SPEED_START_X = MOTOR_STEPS_X; // Initial speed of a motor, steps / s
 const long ACCELERATION_X = 25 * MOTOR_STEPS_X; // Acceleration of a motor, steps / second ^ 2.
 const long SPEED_MANUAL_MOVE_X = 8 * MOTOR_STEPS_X; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_X = true; // change (true/false) if the carriage moves e.g. "left" when you press "right".
+const bool INVERT_X_ENABLE = false; // change (true/false) if the X axis enable pin is inverted
 const bool NEEDS_REST_X = false; // Set to false for all kinds of drivers or X will be unlocked when not moving.
 const long MAX_TRAVEL_MM_X = 100; // Cross slide doesn't allow to travel more than this in one go, 10cm
 const long BACKLASH_DU_X = 0; // 0.15mm backlash in deci-microns (10^-7 of a meter)
@@ -66,6 +68,7 @@ const long SPEED_START_Y = 1600; // Initial speed of a motor, steps / second.
 const long ACCELERATION_Y = 16000; // Acceleration of a motor, steps / second ^ 2.
 const long SPEED_MANUAL_MOVE_Y = 3200; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_Y = false; // change (true/false) if the carriage moves e.g. "left" when you press "right".
+const bool INVERT_Y_ENABLE = false; // change (true/false) if the Y axis enable pin is inverted
 const bool NEEDS_REST_Y = false; // Set to false for closed-loop drivers. Open-loop: true if you need holding torque, false otherwise.
 const long MAX_TRAVEL_MM_Y = 360; // Probably doesn't make sense to ask the dividin head to travel multiple turns.
 const long BACKLASH_DU_Y = 0; // Assuming no backlash on the worm gear
@@ -101,7 +104,9 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 
 
 // To be changed whenever a different PCB / encoder / stepper / ... design is used.
-# 241 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 136 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+volatile unsigned long knobLastChange;
+# 251 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
 struct CircleBuffer {
   char* buffer;
   size_t head;
@@ -109,19 +114,21 @@ struct CircleBuffer {
   size_t size;
 };
 
-# 249 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 250 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 251 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 252 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 253 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 254 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-# 255 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
-
-
-
 # 259 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
 # 260 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
 # 261 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 262 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 263 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 264 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 265 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+
+
+
+
+
+# 271 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 272 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
+# 273 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 2
 
 const char indexhtml[] = R"rawliteral(
 <!DOCTYPE html>
@@ -559,9 +566,9 @@ int nextStarts = starts; // number of starts that should be used asap
 bool nextStartsFlag = false; // whether nextStarts requires attention
 
 TaskHandle_t taskDisplayHandle = 
-# 697 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 709 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                 __null
-# 697 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 709 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                     ;
 
 struct Axis {
@@ -610,6 +617,7 @@ struct Axis {
   bool savedDisabled;
 
   bool invertStepper; // change (true/false) if the carriage moves e.g. "left" when you press "right".
+  bool invertEnable; // change (true/false) if the Enable pin is inverted
   bool needsRest; // set to false for closed-loop drivers, true for open-loop.
   bool movingManually; // whether stepper is being moved by left/right buttons
   long estopSteps; // amount of steps to exceed machine limits
@@ -627,7 +635,7 @@ struct Axis {
 };
 
 void initAxis(Axis* a, char name, bool active, bool rotational, float motorSteps, float screwPitch, long speedStart, long speedManualMove,
-    long acceleration, bool invertStepper, bool needsRest, long maxTravelMm, long backlashDu, int ena, int dir, int step, int pulseA, int pulseB, pcnt_unit_t pulseUnit) {
+    long acceleration, bool invertStepper, bool invertEnable, bool needsRest, long maxTravelMm, long backlashDu, int ena, int dir, int step, int pulseA, int pulseB, pcnt_unit_t pulseUnit) {
   a->mutex = xQueueCreateMutex( ( ( uint8_t ) 1U ) );
 
   a->name = name;
@@ -659,7 +667,7 @@ void initAxis(Axis* a, char name, bool active, bool rotational, float motorSteps
   a->speed = speedStart;
   a->speedStart = speedStart;
   a->speedMax = 0x7fffffffL
-# 793 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 806 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                        ;
   a->speedManualMove = speedManualMove;
   a->acceleration = acceleration;
@@ -678,6 +686,7 @@ void initAxis(Axis* a, char name, bool active, bool rotational, float motorSteps
   a->savedDisabled = false;
 
   a->invertStepper = invertStepper;
+  a->invertEnable = invertEnable;
   a->needsRest = needsRest;
   a->movingManually = false;
   a->estopSteps = maxTravelMm * 10000 / a->screwPitch * a->motorSteps;
@@ -740,7 +749,7 @@ int turnPasses = 3; // In turn mode, how many turn passes to make
 int savedTurnPasses = 0; // value of turnPasses saved in Preferences
 
 long setupIndex = 0; // Index of automation setup step
-bool auxForward = true; // True for external, false for external thread
+bool auxForward = true; // True for external, false for internal thread
 bool savedAuxForward = false; // value of auxForward saved in Preferences
 
 long opIndex = 0; // Index of an automation operation
@@ -767,7 +776,9 @@ int gcodeProgramCount = 0;
 String gcodeProgram = "";
 int gcodeProgramCharIndex = 0;
 
-PS2KeyAdvanced keyboard;
+
+
+
 
 hw_timer_t *async_timer = timerBegin(1000000 /* 1MHz async timer frequency*/);
 bool timerAttached = false;
@@ -1034,9 +1045,9 @@ void taskWiFi(void *param) {
   for (int i = 0; i < 40; i++) {
     if (WiFi.status() == WL_CONNECTED) break;
     vTaskDelay(500 / ( ( TickType_t ) 1000 / 
-# 1166 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
+# 1182 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
    1000 
-# 1166 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1182 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    ));;
     vPortYield();
   }
@@ -1053,9 +1064,9 @@ void taskWiFi(void *param) {
       wifiStatus = String(wl_status_to_string(WiFi.status()));
     }
     vTaskDelete(
-# 1181 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1197 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                __null
-# 1181 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1197 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                    );
     return;
   }
@@ -1171,9 +1182,9 @@ void taskWiFi(void *param) {
     vPortYield();
   }
   vTaskDelete(
-# 1295 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1311 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 1295 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1311 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -1195,15 +1206,15 @@ void setEmergencyStop(int kind) {
 
 void updateEnable(Axis* a) {
   if (!a->disabled && (!a->needsRest || a->stepperEnableCounter > 0)) {
-    digitalWrite(a->ena, 0x1);
+    digitalWrite(a->ena, a->invertEnable ? 0x0 : 0x1);
     // Stepper driver needs some time before it will react to pulses.
     vTaskDelay(STEPPED_ENABLE_DELAY_MS / ( ( TickType_t ) 1000 / 
-# 1318 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
+# 1334 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
    1000 
-# 1318 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1334 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    ));;
   } else {
-    digitalWrite(a->ena, 0x0);
+    digitalWrite(a->ena, a->invertEnable ? 0x1 : 0x0);
   }
 }
 
@@ -1230,14 +1241,14 @@ void markAxisOrigin(Axis* a) {
     beepFlag = true;
   }
   if (a->leftStop != 0x7fffffffL
-# 1346 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1362 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                             ) {
     a->leftStop -= a->pos;
   }
   if (a->rightStop != 
-# 1349 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1365 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                      (-0x7fffffffL - 1L)
-# 1349 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1365 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                              ) {
     a->rightStop -= a->pos;
   }
@@ -1248,9 +1259,9 @@ void markAxisOrigin(Axis* a) {
   a->pendingPos = 0;
   if (hasSemaphore) {
     xQueueGenericSend( ( QueueHandle_t ) ( a->mutex ), 
-# 1358 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1374 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
    __null
-# 1358 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1374 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
   }
 }
@@ -1393,11 +1404,11 @@ long getAxisPosDu(Axis* a) {
 
 long getAxisStopDiffDu(Axis* a) {
   if (a->leftStop == 0x7fffffffL 
-# 1499 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1515 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                              || a->rightStop == 
-# 1499 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1515 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                 (-0x7fffffffL - 1L)
-# 1499 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1515 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                         ) return 0;
   return stepsToDu(a, a->leftStop - a->rightStop);
 }
@@ -1417,11 +1428,15 @@ String printAxisStopDiff(Axis* a, bool addTrailingSpace) {
   return addTrailingSpace ? result + ' ' : result;
 }
 
-String printAxisPosWithName(Axis* a, bool addTrailingSpace) {
+String printAxisPosWithName(Axis* a, bool addTrailingSpace, int padToLength = 0) {
   if (!a->active || a->disabled) return "";
   String result = String(a->name);
   result += printAxisPos(a);
-  return addTrailingSpace ? result + ' ' : result;
+  if (addTrailingSpace) result += ' ';
+  while (result.length() < padToLength) {
+    result += ' ';
+  }
+  return result;
 }
 
 String printNoTrailing0(float value) {
@@ -1455,7 +1470,8 @@ bool manualMovesAllowedWhenOn() {
 
 int getLastSetupIndex() {
   if (mode == 3 || mode == 9) return 2;
-  if (mode == 4 || mode == 5 || mode == 6 || mode == 7 || mode == 8) return 3;
+  if (mode == 7) return 4;
+  if (mode == 4 || mode == 5 || mode == 6 || mode == 8) return 3;
   return 0;
 }
 
@@ -1585,7 +1601,7 @@ void updateDisplay() {
   if (splashScreen) {
     splashScreen = false;
     screenClear();
-    setText("t0", "NanoEls H" + String(5) + " V" + String(8));
+    setText("t0", "NanoEls H" + String(5) + " V" + String(9));
     lcdHashLine0 = -3845709 /* Random number that's unlikely to naturally occur as an actual hash*/;
     lcdHashLine1 = -3845709 /* Random number that's unlikely to naturally occur as an actual hash*/;
     lcdHashLine2 = -3845709 /* Random number that's unlikely to naturally occur as an actual hash*/;
@@ -1609,20 +1625,20 @@ void updateDisplay() {
       result += isOn ? "ON " : "off ";
       int beforeStops = result.length();
       if (z.leftStop != 0x7fffffffL
-# 1709 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1730 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                ) result += "L";
       if (x.leftStop != 0x7fffffffL
-# 1710 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1731 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                ) result += "U";
       if (x.rightStop != 
-# 1711 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1732 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                         (-0x7fffffffL - 1L)
-# 1711 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1732 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                 ) result += "D";
       if (z.rightStop != 
-# 1712 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1733 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                         (-0x7fffffffL - 1L)
-# 1712 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1733 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                 ) result += "R";
       if (beforeStops != result.length()) result += " ";
 
@@ -1660,7 +1676,7 @@ void updateDisplay() {
   long newHashLine2 = zDisplayPos + xDisplayPos + yDisplayPos + measure + z.disabled + x.disabled + mode;
   if (lcdHashLine2 != newHashLine2) {
     lcdHashLine2 = newHashLine2;
-    setText("t2", printAxisPosWithName(&z, true) + printAxisPosWithName(&x, true));
+    setText("t2", printAxisPosWithName(&z, true, 10) + printAxisPosWithName(&x, true));
   }
 
   long numpadResult = getNumpadResult();
@@ -1675,46 +1691,46 @@ void updateDisplay() {
   long newHashLine3 = z.pos + (showAngle ? spindlePos : -1) + (showTacho ? rpm : -2) + measure + (numpadResult > 0 ? numpadResult : -1) + mode * 5 + dupr +
       (mode == 3 ? round(coneRatio * 10000) : 0) + turnPasses + opIndex + setupIndex + gcodeProgramIndex + gcodeProgramCount + spindleStopped * 3 + (isOn ? 139 : -117) + (inNumpad ? 10 : 0) + (auxForward ? 17 : -31) +
       (z.leftStop == 0x7fffffffL 
-# 1763 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1784 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                              ? 123 : z.leftStop) + (z.rightStop == 
-# 1763 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1784 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                    (-0x7fffffffL - 1L) 
-# 1763 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1784 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                             ? 1234 : z.rightStop) +
       (x.leftStop == 0x7fffffffL 
-# 1764 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1785 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                              ? 1235 : x.leftStop) + (x.rightStop == 
-# 1764 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1785 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                     (-0x7fffffffL - 1L) 
-# 1764 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1785 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                              ? 123456 : x.rightStop) + gcodeCommandHash +
       (mode == 10 ? y.pos + y.originPos + (y.leftStop == 0x7fffffffL 
-# 1765 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1786 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                      ? 123 : y.leftStop) + (y.rightStop == 
-# 1765 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1786 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                            (-0x7fffffffL - 1L) 
-# 1765 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1786 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                                     ? 1234 : y.rightStop) + y.disabled : 0) + x.pos + z.pos;
   if (lcdHashLine3 != newHashLine3) {
     lcdHashLine3 = newHashLine3;
     String result = "";
     if (mode == 10 && !inNumpad) {
       if (y.leftStop != 0x7fffffffL 
-# 1770 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                 && y.rightStop != 
-# 1770 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                   (-0x7fffffffL - 1L)
-# 1770 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                           ) {
         result = "UD ";
       } else if (y.leftStop != 0x7fffffffL
-# 1772 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1793 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                       ) {
         result = "D ";
       } else if (y.rightStop != 
-# 1774 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1795 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                (-0x7fffffffL - 1L)
-# 1774 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1795 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                        ) {
         result = "U ";
       }
@@ -1736,18 +1752,18 @@ void updateDisplay() {
       }
     } else if (isPassMode()) {
       bool missingZStops = needZStops() && (z.leftStop == 0x7fffffffL 
-# 1794 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1815 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                   || z.rightStop == 
-# 1794 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1815 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                     (-0x7fffffffL - 1L)
-# 1794 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1815 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                             );
       bool missingStops = missingZStops || x.leftStop == 0x7fffffffL 
-# 1795 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1816 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                  || x.rightStop == 
-# 1795 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 1816 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                    (-0x7fffffffL - 1L)
-# 1795 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1816 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                            ;
       if (!inNumpad && missingStops) {
         result = needZStops() ? "Set all stops" : "Set X stops";
@@ -1768,12 +1784,22 @@ void updateDisplay() {
         } else {
           result = auxForward ? "External?" : "Internal?";
         }
-      } else if (!isOn && setupIndex == 3) {
+      } else if (mode == 7 && !isOn && setupIndex == 3) {
+        result = "Cone ratio " + String(numpadToConeRatio(), 5) + "?";
+      } else if (!isOn && setupIndex == getLastSetupIndex()) {
         long zOffset = getPassModeZStart() - z.pos;
         long xOffset = getPassModeXStart() - x.pos;
         result = "Go";
-        if (zOffset != 0) result += " " + z.name + printDeciMicrons(stepsToDu(&z, zOffset), 2);
-        if (xOffset != 0) result += " " + x.name + printDeciMicrons(stepsToDu(&x, xOffset), 2);
+        if (zOffset != 0) {
+          result += " ";
+          result += z.name;
+          result += printDeciMicrons(stepsToDu(&z, zOffset), 2);
+        }
+        if (xOffset != 0) {
+          result += " ";
+          result += x.name;
+          result += printDeciMicrons(stepsToDu(&x, xOffset), 2);
+        }
         result += "?";
       } else if (isOn && numpadResult == 0) {
         result = "Pass " + String(opIndex) + " of " + String(max(opIndex, long(turnPasses * starts)));
@@ -1903,9 +1929,9 @@ void waitForStep(Axis* a) {
     a->continuous = false;
     waitForPendingPos0(a);
     vTaskDelay(DELAY_BETWEEN_STEPS_MS / ( ( TickType_t ) 1000 / 
-# 1949 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
+# 1980 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
    1000 
-# 1949 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 1980 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    ));;
   }
 }
@@ -1954,9 +1980,9 @@ bool stepTo(Axis* a, long newPos, bool continuous) {
       a->pendingPos = newPos - a->motorPos - (newPos > a->pos ? 0 : a->backlashSteps);
     }
     xQueueGenericSend( ( QueueHandle_t ) ( a->mutex ), 
-# 1996 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2027 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
    __null
-# 1996 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2027 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
     return true;
   }
@@ -2044,9 +2070,9 @@ void taskMoveZ(void *param) {
           };
           prevSpindlePos = spindlePos;
           xQueueGenericSend( ( QueueHandle_t ) ( motionMutex ), 
-# 2082 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2113 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
          __null
-# 2082 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2113 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
          , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         }
 
@@ -2062,9 +2088,9 @@ void taskMoveZ(void *param) {
             stepperOn = false;
           }
           vTaskDelay(200 / ( ( TickType_t ) 1000 / 
-# 2096 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
+# 2127 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3
          1000 
-# 2096 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2127 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
          ));;
         }
       } while (left ? buttonLeftPressed : buttonRightPressed);
@@ -2100,9 +2126,9 @@ void taskMoveZ(void *param) {
         } else {
           markOrigin();
           xQueueGenericSend( ( QueueHandle_t ) ( motionMutex ), 
-# 2130 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2161 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
          __null
-# 2130 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2161 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
          , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
         }
       } else if (isOn && mode == 2) {
@@ -2115,14 +2141,14 @@ void taskMoveZ(void *param) {
       stepperEnable(&z, false);
     }
     z.speedMax = 0x7fffffffL
-# 2141 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2172 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                         ;
     vPortYield();
   }
   vTaskDelete(
-# 2144 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2175 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 2144 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2175 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -2172,24 +2198,24 @@ void taskMoveX(void *param) {
       } else {
         markOrigin();
         xQueueGenericSend( ( QueueHandle_t ) ( motionMutex ), 
-# 2192 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2223 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
        __null
-# 2192 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2223 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
        , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
       }
     }
     x.movingManually = false;
     x.speedMax = 0x7fffffffL
-# 2196 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2227 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                         ;
     stepperEnable(&x, false);
 
     vPortYield();
   }
   vTaskDelete(
-# 2201 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2232 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 2201 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2232 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -2228,15 +2254,15 @@ void taskMoveY(void *param) {
     if (isOn && mode == 10) updateAsyncTimerSettings();
     y.movingManually = false;
     y.speedMax = 0x7fffffffL
-# 2238 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2269 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                         ;
     stepperEnable(&y, false);
     vPortYield();
   }
   vTaskDelete(
-# 2242 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2273 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 2242 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2273 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -2481,7 +2507,7 @@ void taskGcode(void *param) {
         writeBuffer(&outBuffer, ",");
         writeBuffer(&outBuffer, getApproxRpm());
         writeBuffer(&outBuffer, "|Id:");
-        writeBuffer(&outBuffer, "H" + String(5) + "V" + String(8));
+        writeBuffer(&outBuffer, "H" + String(5) + "V" + String(9));
         writeBuffer(&outBuffer, ">"); // no new line to allow client to easily cut out the status response
       } else if (gcodeInSave && receivedChar == '"' /* end of saved program */) {
         gcodeInSave = false;
@@ -2547,9 +2573,9 @@ void taskGcode(void *param) {
     vPortYield();
   }
   vTaskDelete(
-# 2551 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2582 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 2551 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2582 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -2571,19 +2597,6 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcnt_counter_pause(unit);
   pcnt_counter_clear(unit);
   pcnt_counter_resume(unit);
-}
-
-// Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
-void taskAttachInterrupts(void *param) {
-  startPulseCounter(PCNT_UNIT_0, 13, 14);
-  startPulseCounter(PCNT_UNIT_1, 18, 8);
-  startPulseCounter(PCNT_UNIT_2, 47, 21);
-  startPulseCounter(PCNT_UNIT_3, 45, 48);
-  vTaskDelete(
-# 2580 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
-             __null
-# 2580 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
-                 );
 }
 
 void setDupr(long value) {
@@ -2700,13 +2713,13 @@ void applyConeRatio() {
 
 void reset() {
   z.leftStop = 0x7fffffffL
-# 2696 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2718 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
   z.nextLeftStopFlag = false;
   z.rightStop = 
-# 2698 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2720 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                (-0x7fffffffL - 1L)
-# 2698 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2720 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                        ;
   z.nextRightStopFlag = false;
   z.originPos = 0;
@@ -2715,13 +2728,13 @@ void reset() {
   z.pendingPos = 0;
   z.disabled = false;
   x.leftStop = 0x7fffffffL
-# 2705 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2727 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
   x.nextLeftStopFlag = false;
   x.rightStop = 
-# 2707 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2729 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                (-0x7fffffffL - 1L)
-# 2707 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2729 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                        ;
   x.nextRightStopFlag = false;
   x.originPos = 0;
@@ -2730,13 +2743,13 @@ void reset() {
   x.pendingPos = 0;
   x.disabled = false;
   y.leftStop = 0x7fffffffL
-# 2714 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2736 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
   y.nextLeftStopFlag = false;
   y.rightStop = 
-# 2716 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2738 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                (-0x7fffffffL - 1L)
-# 2716 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2738 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                        ;
   y.nextRightStopFlag = false;
   y.originPos = 0;
@@ -2813,23 +2826,24 @@ void buttonPlusMinusPress(bool plus) {
 void buttonOnOffPress(bool on) {
   resetMillis = millis();
   bool missingZStops = needZStops() && (z.leftStop == 0x7fffffffL 
-# 2791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2813 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                               || z.rightStop == 
-# 2791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2813 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                 (-0x7fffffffL - 1L)
-# 2791 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2813 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                         );
   if (on && isPassMode() && (missingZStops || x.leftStop == 0x7fffffffL 
-# 2792 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2814 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                     || x.rightStop == 
-# 2792 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2814 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                       (-0x7fffffffL - 1L)
-# 2792 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2814 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                               )) {
     beep();
   } else if (!isOn && on && mode == 9 && gcodeProgramIndex >= gcodeProgramCount && setupIndex == 1) {
     beep();
   } else if (!isOn && on && setupIndex < getLastSetupIndex()) {
+    if (mode == 7 && setupIndex == 3) setConeRatio(0);
     // Move to the next setup step.
     setupIndex++;
   } else if (isOn && on && (mode == 4 || mode == 5 || mode == 7)) {
@@ -2906,21 +2920,21 @@ void applyRightStop(Axis* a) {
 
 void buttonLeftStopPress(Axis* a) {
   setLeftStop(a, a->leftStop == 0x7fffffffL 
-# 2872 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2895 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                         ? a->pos : 0x7fffffffL
-# 2872 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2895 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                            );
 }
 
 void buttonRightStopPress(Axis* a) {
   setRightStop(a, a->rightStop == 
-# 2876 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                  (-0x7fffffffL - 1L) 
-# 2876 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                           ? a->pos : 
-# 2876 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 2899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                      (-0x7fffffffL - 1L)
-# 2876 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 2899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                              );
 }
 
@@ -3013,6 +3027,9 @@ bool processNumpadResult(int keyCode) {
   if (keyCode == 30 /* Enter - starts operation or mode*/) {
     if (isPassMode() && setupIndex == 1) {
       setTurnPasses(int(min(PASSES_MAX, numpadResult)));
+      setupIndex++;
+    } else if (mode == 7 && setupIndex == 3) {
+      setConeRatio(newConeRatio);
       setupIndex++;
     } else if (mode == 3 && setupIndex == 1) {
       setConeRatio(newConeRatio);
@@ -3151,10 +3168,10 @@ void processKeypadEvent() {
     event = wsKeycode;
     wsKeycode = 0;
   }
-# 3114 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3140 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
   if (event == 0) return;
   int keyCode = event & 0xFF;
-  bool isPress = !(event & PS2_BREAK);
+  bool isPress = !(event & 0x8000);
   keypadTimeUs = micros();
 
   // Uncomment the line below to see the key codes on screen.
@@ -3292,9 +3309,77 @@ void taskKeypad(void *param) {
     vPortYield();
   }
   vTaskDelete(
-# 3253 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3279 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 3253 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3279 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+                 );
+}
+
+void __attribute__((section(".iram1" "." "1"))) knobChange() {
+  static int8_t enc_states[] = {0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
+  static uint8_t old_AB = 0;
+  static int8_t encval = 0;
+  static unsigned long lastInterruptTime = 0;
+  unsigned long interruptTime = millis();
+  /*if ((millis() - knobLastChange) < ENCODER_KNOB_DEBOUNCE_TIME)  // debounce time is 50ms
+
+    return;
+
+
+
+  if (digitalRead(ENCODER_KNOB_DATA) == HIGH) {
+
+    buttonPlusMinusPress(false);
+
+  } else {
+
+    buttonPlusMinusPress(true);
+
+  }
+
+
+
+  knobLastChange = millis();*/
+# 3298 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+  old_AB <<= 2; //remember previous state
+  if (digitalRead(4)) old_AB |= 0x02; // Add current state of pin A
+  if (digitalRead(5)) old_AB |= 0x01; // Add current state of pin B
+
+  encval += enc_states[( old_AB & 0x0f )];
+  if( encval > 3 ) { // Four steps forward
+    buttonPlusMinusPress(false); // Increase by 1
+    encval = 0;
+    lastInterruptTime = millis(); // Remember time
+  }
+  else if( encval < -3 ) { // Four steps backwards
+    buttonPlusMinusPress(true); // Decrease by 1
+    encval = 0;
+    lastInterruptTime = millis(); // Remember time
+  }
+}
+
+void __attribute__((section(".iram1" "." "2"))) knobSwitch() {
+  if ((millis() - knobLastChange) < 50) // debounce time is 50ms
+    return;
+
+  buttonMoveStepPress();
+
+  knobLastChange = millis();
+}
+
+// Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
+void taskAttachInterrupts(void *param) {
+  startPulseCounter(PCNT_UNIT_0, 13, 14);
+  startPulseCounter(PCNT_UNIT_1, 18, 8);
+  startPulseCounter(PCNT_UNIT_2, 47, 21);
+  startPulseCounter(PCNT_UNIT_3, 45, 48);
+  attachInterrupt(((((uint8_t)(5)) < 49 /* All GPIOs*/) ? (5) : -1), knobChange, 0x03);
+  attachInterrupt(((((uint8_t)(4)) < 49 /* All GPIOs*/) ? (4) : -1), knobChange, 0x03);
+  attachInterrupt(((((uint8_t)(6)) < 49 /* All GPIOs*/) ? (6) : -1), knobSwitch, 0x01);
+  vTaskDelete(
+# 3333 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+             __null
+# 3333 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -3343,9 +3428,9 @@ void moveAxis(Axis* a) {
       digitalWrite(a->step, 0x1);
     }
     xQueueGenericSend( ( QueueHandle_t ) ( a->mutex ), 
-# 3300 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3380 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
    __null
-# 3300 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3380 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
    , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
   }
 }
@@ -3355,7 +3440,7 @@ void modeGearbox() {
     return;
   }
   z.speedMax = 0x7fffffffL
-# 3308 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3388 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
   stepToContinuous(&z, posFromSpindle(&z, spindlePosAvg, true));
 }
@@ -3364,18 +3449,18 @@ long auxSafeDistance, startOffset;
 void modeTurn(Axis* main, Axis* aux) {
   if (main->movingManually || aux->movingManually || turnPasses <= 0 ||
       main->leftStop == 0x7fffffffL 
-# 3315 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3395 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                 || main->rightStop == 
-# 3315 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3395 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                       (-0x7fffffffL - 1L) 
-# 3315 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3395 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                ||
       aux->leftStop == 0x7fffffffL 
-# 3316 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3396 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                || aux->rightStop == 
-# 3316 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3396 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                     (-0x7fffffffL - 1L) 
-# 3316 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3396 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                              ||
       dupr == 0 || (dupr * opDuprSign < 0) || starts < 1) {
     setIsOnFromLoop(false);
@@ -3426,7 +3511,7 @@ void modeTurn(Axis* main, Axis* aux) {
     if (opSubIndex == 1) {
       markOrigin();
       main->speedMax = 0x7fffffffL
-# 3365 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3445 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                               ;
       opSubIndex = 2;
       // markOrigin() changed Start/EndStop values, re-calculate them.
@@ -3435,9 +3520,19 @@ void modeTurn(Axis* main, Axis* aux) {
     // Doing the pass cut.
     if (opSubIndex == 2) {
       // In case we were pushed to the next opIndex before finishing the current one.
-      stepToFinal(aux, auxPos);
-      stepToContinuous(main, posFromSpindle(main, spindlePosAvg, true));
-      if (main->pos == mainEndStop) {
+      long mainTargetPos = posFromSpindle(main, spindlePosAvg, true);
+      long auxTargetPos = auxPos;
+      if (mode == 7 && coneRatio != 0) {
+        float coneEffectRatio = -coneRatio / 2 / main->motorSteps * aux->motorSteps / aux->screwPitch * main->screwPitch * (auxForward ? 1 : -1);
+        auxTargetPos = auxPos + round(mainTargetPos * coneEffectRatio);
+      }
+
+      if (auxTargetPos > aux->leftStop) auxTargetPos = aux->leftStop;
+      if (auxTargetPos < aux->rightStop) auxTargetPos = aux->rightStop;
+
+      stepToContinuous(main, mainTargetPos);
+      stepToContinuous(aux, auxTargetPos);
+      if (main->pos == mainEndStop || (coneRatio != 0 && aux->pos == (opDuprSign > 0 ? auxStartStop : auxEndStop))) {
         opSubIndex = 3;
       }
     }
@@ -3487,36 +3582,36 @@ void modeCone() {
 
   // TODO: calculate maximum speeds and accelerations to avoid potential desync.
   x.speedMax = 0x7fffffffL
-# 3424 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3514 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
   z.speedMax = 0x7fffffffL
-# 3425 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3515 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                       ;
 
   // Respect limits of both axis by translating them into limits on spindlePos value.
   long spindle = spindlePosAvg;
   long spindleMin = 
-# 3429 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3519 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                    (-0x7fffffffL - 1L)
-# 3429 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3519 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                            ;
   long spindleMax = 0x7fffffffL
-# 3430 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3520 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                            ;
   if (z.leftStop != 0x7fffffffL
-# 3431 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3521 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                            ) {
     (dupr > 0 ? spindleMax : spindleMin) = spindleFromPos(&z, z.leftStop);
   }
   if (z.rightStop != 
-# 3434 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3524 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                     (-0x7fffffffL - 1L)
-# 3434 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3524 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                             ) {
     (dupr > 0 ? spindleMin: spindleMax) = spindleFromPos(&z, z.rightStop);
   }
   if (x.leftStop != 0x7fffffffL
-# 3437 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3527 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                            ) {
     long lim = spindleFromPos(&z, round(x.leftStop / zToXRatio));
     if (zToXRatio < 0) {
@@ -3526,9 +3621,9 @@ void modeCone() {
     }
   }
   if (x.rightStop != 
-# 3445 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3535 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                     (-0x7fffffffL - 1L)
-# 3445 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3535 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                             ) {
     long lim = spindleFromPos(&z, round(x.rightStop / zToXRatio));
     if (zToXRatio < 0) {
@@ -3549,11 +3644,11 @@ void modeCone() {
 
 void modeCut() {
   if (x.movingManually || turnPasses <= 0 || x.leftStop == 0x7fffffffL 
-# 3464 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3554 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                    || x.rightStop == 
-# 3464 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3554 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                      (-0x7fffffffL - 1L) 
-# 3464 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3554 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                               || dupr == 0 || dupr * opDuprSign < 0) {
     setIsOnFromLoop(false);
     return;
@@ -3580,7 +3675,7 @@ void modeCut() {
     // Doing the pass cut.
     if (opSubIndex == 1) {
       x.speedMax = 0x7fffffffL
-# 3489 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3579 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                           ;
       long endPos = endStop - (endStop - startStop) / turnPasses * (turnPasses - opIndex);
       long xPos = posFromSpindle(&x, spindlePosAvg, true);
@@ -3609,18 +3704,18 @@ void modeCut() {
 void modeEllipse(Axis* main, Axis* aux) {
   if (main->movingManually || aux->movingManually || turnPasses <= 0 ||
       main->leftStop == 0x7fffffffL 
-# 3516 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3606 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                 || main->rightStop == 
-# 3516 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3606 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                       (-0x7fffffffL - 1L) 
-# 3516 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3606 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                ||
       aux->leftStop == 0x7fffffffL 
-# 3517 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3607 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                || aux->rightStop == 
-# 3517 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3607 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                     (-0x7fffffffL - 1L) 
-# 3517 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3607 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                              ||
       main->leftStop == main->rightStop ||
       aux->leftStop == aux->rightStop ||
@@ -3755,7 +3850,7 @@ void processSpindleCounter() {
     spindleEncTimeDiffBulk = 0;
 
   }*/
-# 3650 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3740 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
   spindlePos += delta;
   spindlePosGlobal += delta;
   if (spindlePosGlobal > ENCODER_STEPS_INT) {
@@ -3855,7 +3950,7 @@ void readTouch() {
       case 0x99:
       //setText("t4",String(bytesRead));
         if (bytesRead > 2 && buffer[2] == 0x01)
-          wsKeycode = buffer[1] | PS2_BREAK; // add break bit if key release
+          wsKeycode = buffer[1] | 0x8000; // add break bit if key release
         else
           wsKeycode = buffer[1];
         if (wsKeycode > 0)
@@ -3905,9 +4000,9 @@ void taskDisplay(void *param) {
     setText("t2", "manual move");
   }
   vTaskDelete(
-# 3798 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3888 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
              __null
-# 3798 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3888 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                  );
 }
 
@@ -3932,6 +4027,10 @@ void setup() {
     digitalWrite(17, 0x1);
   }
 
+  pinMode(5, 0x01);
+  pinMode(4, 0x01);
+  pinMode(6, 0x01);
+
   Preferences pref;
   pref.begin("h5");
   if (pref.getInt("v") != 1) {
@@ -3939,9 +4038,9 @@ void setup() {
     pref.putInt("v", 1);
   }
 
-  initAxis(&z, NAME_Z, true, false, MOTOR_STEPS_Z, SCREW_Z_DU, SPEED_START_Z, SPEED_MANUAL_MOVE_Z, ACCELERATION_Z, INVERT_Z, NEEDS_REST_Z, MAX_TRAVEL_MM_Z, BACKLASH_DU_Z, 41, 42, 35, 18, 8, PCNT_UNIT_1);
-  initAxis(&x, NAME_X, true, false, MOTOR_STEPS_X, SCREW_X_DU, SPEED_START_X, SPEED_MANUAL_MOVE_X, ACCELERATION_X, INVERT_X, NEEDS_REST_X, MAX_TRAVEL_MM_X, BACKLASH_DU_X, 16, 15, 7, 47, 21, PCNT_UNIT_2);
-  initAxis(&y, NAME_Y, ACTIVE_Y, ROTARY_Y, MOTOR_STEPS_Y, SCREW_Y_DU, SPEED_START_Y, SPEED_MANUAL_MOVE_Y, ACCELERATION_Y, INVERT_Y, NEEDS_REST_Y, MAX_TRAVEL_MM_Y, BACKLASH_DU_Y, 1, 2, 17, 45, 48, PCNT_UNIT_3);
+  initAxis(&z, NAME_Z, true, false, MOTOR_STEPS_Z, SCREW_Z_DU, SPEED_START_Z, SPEED_MANUAL_MOVE_Z, ACCELERATION_Z, INVERT_Z, INVERT_Z_ENABLE, NEEDS_REST_Z, MAX_TRAVEL_MM_Z, BACKLASH_DU_Z, 41, 42, 35, 18, 8, PCNT_UNIT_1);
+  initAxis(&x, NAME_X, true, false, MOTOR_STEPS_X, SCREW_X_DU, SPEED_START_X, SPEED_MANUAL_MOVE_X, ACCELERATION_X, INVERT_X, INVERT_X_ENABLE, NEEDS_REST_X, MAX_TRAVEL_MM_X, BACKLASH_DU_X, 16, 15, 7, 47, 21, PCNT_UNIT_2);
+  initAxis(&y, NAME_Y, ACTIVE_Y, ROTARY_Y, MOTOR_STEPS_Y, SCREW_Y_DU, SPEED_START_Y, SPEED_MANUAL_MOVE_Y, ACCELERATION_Y, INVERT_Y, INVERT_Y_ENABLE, NEEDS_REST_Y, MAX_TRAVEL_MM_Y, BACKLASH_DU_Y, 1, 2, 17, 45, 48, PCNT_UNIT_3);
 
   isOn = false;
   savedDupr = dupr = pref.getLong("d");
@@ -3952,12 +4051,12 @@ void setup() {
   z.savedOriginPos = z.originPos = pref.getLong("zpo");
   z.savedMotorPos = z.motorPos = pref.getLong("zpm");
   z.savedLeftStop = z.leftStop = pref.getLong("zls", 0x7fffffffL
-# 3841 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3935 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                        );
   z.savedRightStop = z.rightStop = pref.getLong("zrs", 
-# 3842 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3936 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                   (-0x7fffffffL - 1L)
-# 3842 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3936 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                           );
   z.savedDisabled = z.disabled = pref.getBool("zd", false);
   x.savedPos = x.pos = pref.getLong("xp");
@@ -3965,12 +4064,12 @@ void setup() {
   x.savedOriginPos = x.originPos = pref.getLong("xpo");
   x.savedMotorPos = x.motorPos = pref.getLong("xpm");
   x.savedLeftStop = x.leftStop = pref.getLong("xls", 0x7fffffffL
-# 3848 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3942 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                        );
   x.savedRightStop = x.rightStop = pref.getLong("xrs", 
-# 3849 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3943 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                   (-0x7fffffffL - 1L)
-# 3849 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3943 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                           );
   x.savedDisabled = x.disabled = pref.getBool("xd", false);
   y.savedPos = y.pos = pref.getLong("y1p");
@@ -3978,12 +4077,12 @@ void setup() {
   y.savedOriginPos = y.originPos = pref.getLong("y1po");
   y.savedMotorPos = y.motorPos = pref.getLong("y1pm");
   y.savedLeftStop = y.leftStop = pref.getLong("y1ls", 0x7fffffffL
-# 3855 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3949 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                        );
   y.savedRightStop = y.rightStop = pref.getLong("y1rs", 
-# 3856 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3950 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                   (-0x7fffffffL - 1L)
-# 3856 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3950 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                           );
   y.savedDisabled = y.disabled = pref.getBool("y1d", false);
   savedSpindlePos = spindlePos = pref.getLong("sp");
@@ -4000,9 +4099,9 @@ void setup() {
   savedAuxForward = auxForward = pref.getBool("af", true);
   pref.end();
 
-  if (!z.needsRest && !z.disabled) digitalWrite(z.ena, 0x1);
-  if (!x.needsRest && !x.disabled) digitalWrite(x.ena, 0x1);
-  if (y.active && !y.needsRest && !y.disabled) digitalWrite(y.ena, 0x1);
+  if (!z.needsRest && !z.disabled) digitalWrite(z.ena, z.invertEnable ? 0x0 : 0x1);
+  if (!x.needsRest && !x.disabled) digitalWrite(x.ena, x.invertEnable ? 0x0 : 0x1);
+  if (y.active && !y.needsRest && !y.disabled) digitalWrite(y.ena, y.invertEnable ? 0x0 : 0x1);
 
   if (LittleFS.begin(true)) {
     gcodeProgramCount = getGcodeProgramCount();
@@ -4023,63 +4122,63 @@ void setup() {
   // Non-time-sensitive tasks on core 0.
   delay(1300); // Nextion needs time to boot or first display update will be ignored.
   xTaskCreatePinnedToCore(taskAttachInterrupts, "taskAttachInterrupts", 10000 /* stack size */, 
-# 3894 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3988 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                __null
-# 3894 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3988 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                    , 0 /* priority */, 
-# 3894 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3988 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                                        __null
-# 3894 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3988 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                                            , 0 /* core */);
   xTaskCreatePinnedToCore(taskDisplay, "taskDisplay", 10000 /* stack size */, 
-# 3895 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3989 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                              __null
-# 3895 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3989 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                  , 0 /* priority */, &taskDisplayHandle, 0 /* core */);
   xTaskCreatePinnedToCore(taskMoveZ, "taskMoveZ", 10000 /* stack size */, 
-# 3896 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3990 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                          __null
-# 3896 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3990 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                              , 0 /* priority */, 
-# 3896 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3990 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                  __null
-# 3896 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3990 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                      , 0 /* core */);
   xTaskCreatePinnedToCore(taskMoveX, "taskMoveX", 10000 /* stack size */, 
-# 3897 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3991 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                          __null
-# 3897 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3991 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                              , 0 /* priority */, 
-# 3897 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3991 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                  __null
-# 3897 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3991 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                      , 0 /* core */);
   if (y.active) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, 
-# 3898 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3992 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                        __null
-# 3898 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3992 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                            , 0 /* priorty */, 
-# 3898 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3992 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                               __null
-# 3898 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3992 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                                   , 0 /* core */);
   xTaskCreatePinnedToCore(taskGcode, "taskGcode", 10000 /* stack size */, 
-# 3899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3993 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                          __null
-# 3899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3993 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                              , 0 /* priority */, 
-# 3899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3993 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                  __null
-# 3899 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3993 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                      , 0 /* core */);
   if (WIFI_ENABLED) xTaskCreatePinnedToCore(taskWiFi, "taskWiFI", 10000 /* stack size */, 
-# 3900 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3994 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                          __null
-# 3900 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3994 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                              , 0 /* priority */, 
-# 3900 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 3994 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
                                                                                                                  __null
-# 3900 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 3994 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
                                                                                                                      , 0 /* core */);
 }
 
@@ -4114,8 +4213,8 @@ void loop() {
   moveAxis(&x);
   if (ACTIVE_Y) moveAxis(&y);
   xQueueGenericSend( ( QueueHandle_t ) ( motionMutex ), 
-# 3933 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
+# 4027 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino" 3 4
  __null
-# 3933 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
+# 4027 "C:\\Users\\Andre\\Documents\\nanoels\\h5\\h5.ino"
  , ( ( TickType_t ) 0U ), ( ( BaseType_t ) 0 ) );
 }

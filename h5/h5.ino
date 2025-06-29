@@ -129,6 +129,13 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define KEY_DATA 37
 #define KEY_CLOCK 36
 
+#define ENCODER_KNOB_DATA 4
+#define ENCODER_KNOB_CLK 5
+#define ENCODER_KNOB_SW 6
+#define ENCODER_KNOB_DEBOUNCE_TIME 50
+volatile unsigned long knobLastChange;
+
+
 #define B_LEFT 21 // Left arrow - controls Z axis movement to the left
 #define B_RIGHT 22 // Right arrow - controls Z axis movement to the right
 #define B_UP 23 // Up arrow - controls X axis movement forwards
@@ -2595,15 +2602,6 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcnt_counter_resume(unit);
 }
 
-// Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
-void taskAttachInterrupts(void *param) {
-  startPulseCounter(PCNT_UNIT_0, ENC_A, ENC_B);
-  startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
-  startPulseCounter(PCNT_UNIT_2, X_PULSE_A, X_PULSE_B);
-  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);
-  vTaskDelete(NULL);
-}
-
 void setDupr(long value) {
   // Can't apply changes right away since we might be in the middle of motion logic.
   nextDupr = value;
@@ -3281,6 +3279,60 @@ void taskKeypad(void *param) {
   vTaskDelete(NULL);
 }
 
+void IRAM_ATTR knobChange() {
+  static int8_t enc_states[] = {0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
+  static uint8_t old_AB = 0;
+  static int8_t encval = 0;
+  static unsigned long lastInterruptTime = 0;
+  unsigned long interruptTime = millis();  
+  /*if ((millis() - knobLastChange) < ENCODER_KNOB_DEBOUNCE_TIME)  // debounce time is 50ms
+    return;
+
+  if (digitalRead(ENCODER_KNOB_DATA) == HIGH) {
+    buttonPlusMinusPress(false);
+  } else {
+    buttonPlusMinusPress(true);
+  }
+
+  knobLastChange = millis();*/
+  old_AB <<= 2;                   //remember previous state
+  if (digitalRead(ENCODER_KNOB_DATA)) old_AB |= 0x02; // Add current state of pin A
+  if (digitalRead(ENCODER_KNOB_CLK)) old_AB |= 0x01; // Add current state of pin B
+  
+  encval += enc_states[( old_AB & 0x0f )];
+  if( encval > 3 ) {                                    // Four steps forward
+    buttonPlusMinusPress(false);                       // Increase by 1
+    encval = 0;
+    lastInterruptTime = millis();                       // Remember time
+  }
+  else if( encval < -3 ) {                              // Four steps backwards
+    buttonPlusMinusPress(true);                       // Decrease by 1
+    encval = 0;
+    lastInterruptTime = millis();                       // Remember time
+  }  
+}
+
+void IRAM_ATTR knobSwitch() {
+  if ((millis() - knobLastChange) < ENCODER_KNOB_DEBOUNCE_TIME)  // debounce time is 50ms
+    return;
+
+  buttonMoveStepPress();
+
+  knobLastChange = millis();
+}
+
+// Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
+void taskAttachInterrupts(void *param) {
+  startPulseCounter(PCNT_UNIT_0, ENC_A, ENC_B);
+  startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
+  startPulseCounter(PCNT_UNIT_2, X_PULSE_A, X_PULSE_B);
+  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_KNOB_CLK), knobChange, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_KNOB_DATA), knobChange, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ENCODER_KNOB_SW), knobSwitch, RISING);
+  vTaskDelete(NULL);
+}
+
 void moveAxis(Axis* a) {
   // Most of the time a step isn't needed.
   if (a->pendingPos == 0) {
@@ -3856,6 +3908,10 @@ void setup() {
     pinMode(Y_ENA, OUTPUT);
     DHIGH(Y_STEP);
   }
+
+  pinMode(ENCODER_KNOB_CLK, INPUT);
+  pinMode(ENCODER_KNOB_DATA, INPUT);
+  pinMode(ENCODER_KNOB_SW, INPUT);
 
   Preferences pref;
   pref.begin(PREF_NAMESPACE);
