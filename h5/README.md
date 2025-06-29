@@ -1,6 +1,7 @@
 Fork including:
 
 - Touch Screen
+- Upload Screen & ESP firmware from the web page
 - Yellow background (a tribute to H4's design)
 - Encoder to replace 0-9 and + - Enter, etc. to gain screen real estate
 
