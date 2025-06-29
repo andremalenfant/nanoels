@@ -255,8 +255,10 @@ struct CircleBuffer {
 #include <WebSocketsServer.h> // install via Libraries as "WebSockets"
 #include <driver/pcnt.h>
 #include <Preferences.h>
-#ifdef KEYBAORD_ENABLED
+#ifdef KEYBOARD_ENABLED
   #include <PS2KeyAdvanced.h> // install via Libraries as "PS2KeyAdvanced"
+#else
+  #define PS2_BREAK 0x8000
 #endif
 #include <Update.h>
 #include <SPIFFS.h>
@@ -902,7 +904,9 @@ int gcodeProgramCount = 0;
 String gcodeProgram = "";
 int gcodeProgramCharIndex = 0;
 
-PS2KeyAdvanced keyboard;
+#ifdef KEYBOARD_ENABLED
+  PS2KeyAdvanced keyboard;
+#endif
 
 hw_timer_t *async_timer = timerBegin(TIMER_FREQ);
 bool timerAttached = false;
