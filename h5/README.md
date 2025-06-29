@@ -4,7 +4,7 @@ Fork including:
 - Yellow background (a tribute to H4's design)
 - Encoder to replace 0-9 and + - Enter, etc. to gain screen real estate
 
-
+![image](https://github.com/andremalenfant/nanoels/blob/main/h5/TouchELSH5.jpg)
 
 # NanoEls H5
 
