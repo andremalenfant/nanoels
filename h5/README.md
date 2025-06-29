@@ -1,10 +1,12 @@
 Fork including:
 
 - Touch Screen
-- Yellow background (a tribute to H4's design)
-- Encoder to replace 0-9 and + - Enter, etc. to gain screen real estate
+- Upload Screen & ESP firmware from the web page
+- Yellow background (a tribute to H4's design) in h5-2axis-yellow.HMI.
+- Included HMI files are configured for the Nextion Enhanced 3.2" screen as it's the biggest that would fit my lathe head.
+- Encoder to replace 0-9 and + - Enter, etc. to gain screen real estate (because of the smaller screen)
 
-
+![image](https://github.com/andremalenfant/nanoels/blob/main/h5/TouchELSH5.jpg)
 
 # NanoEls H5
 
