@@ -22,7 +22,7 @@ const long MOTOR_SCREW_RATIO_Z = 3;
 const long SCREW_Z_DU = 20000 / MOTOR_SCREW_RATIO_Z; // 2mm --4mm SFU1204 ball screw in deci-microns (10^-7 of a meter)
 const long MOTOR_STEPS_Z = 800;
 const long SPEED_START_Z = MOTOR_STEPS_Z; // Initial speed of a motor, steps / second.
-const long ACCELERATION_Z = 12 * MOTOR_STEPS_Z; // Acceleration of a motor, steps / second ^ 2.
+const long ACCELERATION_Z = 20 * MOTOR_STEPS_Z; // Acceleration of a motor, steps / second ^ 2.
 const long SPEED_MANUAL_MOVE_Z = 6 * MOTOR_STEPS_Z; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_Z = false; // change (true/false) if the carriage moves e.g. "left" when you press "right".
 const bool INVERT_Z_ENABLE = false; // change (true/false) if the Z axis enable pin is inverted
@@ -32,11 +32,11 @@ const long BACKLASH_DU_Z = 2; // 0mm backlash in deci-microns (10^-7 of a meter)
 const char NAME_Z = 'Z'; // Text shown on screen before axis position value, GCode axis name
 
 // Cross-slide lead screw (X) parameters.
-const long SCREW_X_DU = 40000; // 4mm SFU1204 ball screw in deci-microns (10^-7 of a meter)
+const long SCREW_X_DU = 10000; // 4mm SFU1204 ball screw in deci-microns (10^-7 of a meter)
 const long MOTOR_STEPS_X = 800;
 const long SPEED_START_X = MOTOR_STEPS_X; // Initial speed of a motor, steps / second.
-const long ACCELERATION_X = 25 * MOTOR_STEPS_X; // Acceleration of a motor, steps / second ^ 2.
-const long SPEED_MANUAL_MOVE_X = 8 * MOTOR_STEPS_X; // Maximum speed of a motor during manual move, steps / second.
+const long ACCELERATION_X = 20 * MOTOR_STEPS_X; // Acceleration of a motor, steps / second ^ 2.
+const long SPEED_MANUAL_MOVE_X = 6 * MOTOR_STEPS_X; // Maximum speed of a motor during manual move, steps / second.
 const bool INVERT_X = true; // change (true/false) if the carriage moves e.g. "left" when you press "right".
 const bool INVERT_X_ENABLE = false; // change (true/false) if the X axis enable pin is inverted
 const bool NEEDS_REST_X = false; // Set to false for all kinds of drivers or X will be unlocked when not moving.
@@ -220,6 +220,8 @@ volatile unsigned long knobLastChange;
 #define MOVE_STEP_1 10000 // 1mm
 #define MOVE_STEP_2 1000 // 0.1mm
 #define MOVE_STEP_3 100 // 0.01mm
+#define MOVE_STEP_4 10 // 0.001mm
+#define MOVE_STEP_5 1 // 0.0001mm
 
 #define MOVE_STEP_IMP_1 25400 // 1/10"
 #define MOVE_STEP_IMP_2 2540 // 1/100"
@@ -2912,12 +2914,21 @@ void buttonDisplayPress() {
 
 void buttonMoveStepPress() {
   if (measure == MEASURE_METRIC) {
-    if (moveStep == MOVE_STEP_1) {
-      moveStep = MOVE_STEP_2;
-    } else if (moveStep == MOVE_STEP_2) {
-      moveStep = MOVE_STEP_3;
-    } else {
-      moveStep = MOVE_STEP_1;
+    switch(moveStep) {
+      case MOVE_STEP_1:
+        moveStep = MOVE_STEP_2;
+        break;
+      case MOVE_STEP_2:
+        moveStep = MOVE_STEP_3;
+        break;
+      case MOVE_STEP_3:
+        moveStep = MOVE_STEP_4;
+        break;
+      case MOVE_STEP_4:
+        moveStep = MOVE_STEP_5;
+        break;
+      default:      
+        moveStep = MOVE_STEP_1;
     }
   } else {
     if (moveStep == MOVE_STEP_IMP_1) {
@@ -3279,34 +3290,41 @@ void taskKeypad(void *param) {
   vTaskDelete(NULL);
 }
 
+void knobChanged(bool clockwise) {
+  
+  if (mode == MODE_CONE) {
+    if (!isOn && setupIndex == 1) {
+      float changeAmount = moveStep / 10000.0;
+      clockwise ? setConeRatio(coneRatio + changeAmount) : setConeRatio(coneRatio - changeAmount);
+    }
+    else if (!isOn && setupIndex == 2) {
+      auxForward = !auxForward;
+    }
+//    else if (!isOn && setupIndex == 3) //Go;
+  } else {
+    buttonPlusMinusPress(clockwise);
+  }
+}
+
 void IRAM_ATTR knobChange() {
   static int8_t enc_states[] = {0,-1,1,0,1,0,0,-1,-1,0,0,1,0,1,-1,0};
   static uint8_t old_AB = 0;
   static int8_t encval = 0;
   static unsigned long lastInterruptTime = 0;
   unsigned long interruptTime = millis();  
-  /*if ((millis() - knobLastChange) < ENCODER_KNOB_DEBOUNCE_TIME)  // debounce time is 50ms
-    return;
 
-  if (digitalRead(ENCODER_KNOB_DATA) == HIGH) {
-    buttonPlusMinusPress(false);
-  } else {
-    buttonPlusMinusPress(true);
-  }
-
-  knobLastChange = millis();*/
   old_AB <<= 2;                   //remember previous state
   if (digitalRead(ENCODER_KNOB_DATA)) old_AB |= 0x02; // Add current state of pin A
   if (digitalRead(ENCODER_KNOB_CLK)) old_AB |= 0x01; // Add current state of pin B
   
   encval += enc_states[( old_AB & 0x0f )];
   if( encval > 3 ) {                                    // Four steps forward
-    buttonPlusMinusPress(false);                       // Increase by 1
+    knobChanged(false);                       // my encoder is wired reversed
     encval = 0;
     lastInterruptTime = millis();                       // Remember time
   }
   else if( encval < -3 ) {                              // Four steps backwards
-    buttonPlusMinusPress(true);                       // Decrease by 1
+    knobChanged(true);                       // my encoder is wired reversed
     encval = 0;
     lastInterruptTime = millis();                       // Remember time
   }  
@@ -3315,8 +3333,11 @@ void IRAM_ATTR knobChange() {
 void IRAM_ATTR knobSwitch() {
   if ((millis() - knobLastChange) < ENCODER_KNOB_DEBOUNCE_TIME)  // debounce time is 50ms
     return;
-
-  buttonMoveStepPress();
+  if (mode == MODE_CONE && !isOn && setupIndex == 3) {
+    processNumpad(B_ON);
+  } else {
+    buttonMoveStepPress();
+  }
 
   knobLastChange = millis();
 }
