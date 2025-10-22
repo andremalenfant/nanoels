@@ -340,6 +340,18 @@ const char indexhtml[] PROGMEM = R"rawliteral(
     <li><code>~</code> turns the controller on</li>
     <li><code>""</code> removes all GCode</li>
   </ul>
+  <p id="free-space"></p>
+  <h2>Upload Screen Firmware</h2>
+  <form enctype="multipart/form-data" method="post" name="tftForm" id="tftForm">
+    <input type="file" name="tftFile" id="tftFile" accept=".tft" required />
+    <button id="sendTft">Send</button>
+  </form>
+    <p id="free-space"></p>
+  <h2>Upload MCU Firmware</h2>
+  <form enctype="multipart/form-data" method="post" name="sketchForm" id="binForm">
+    <input type="file" name="binFile" id="binFile" accept=".bin" required />
+    <button id="sendBin">Send</button>
+  </form>
 
   <script>
     const log = document.getElementById('log');
@@ -350,6 +362,8 @@ const char indexhtml[] PROGMEM = R"rawliteral(
     const gcodeContentInput = document.getElementById('gcode-content');
     const addGcodeButton = document.getElementById('add-gcode');
     const removeCommentsCheckbox = document.getElementById('remove-comments');
+    const addTftButton = document.getElementById('sendTft');
+    const addBinButton = document.getElementById('sendBin');
 
     const ws = new WebSocket(`ws://${window.location.host.split(':')[0]}:81`);
 
@@ -507,6 +521,30 @@ const char indexhtml[] PROGMEM = R"rawliteral(
       log.appendChild(p);
       log.scrollTop = log.scrollHeight;
     }
+      
+    addTftButton.addEventListener('click', () => {
+      const formData = new FormData(document.getElementById('tftForm'));
+      fetch("/uploadTft", {
+        method: "POST",
+        body: formData,
+        headers: {
+          "tft-file-size": document.getElementById('tftFile').files[0].size,
+        },
+      });
+      event.preventDefault();
+    });
+
+    addBinButton.addEventListener('click', () => {
+      const formData = new FormData(document.getElementById('binForm'));
+      fetch("/uploadBin", {
+        method: "POST",
+        body: formData,
+        headers: {
+          "bin-file-size": document.getElementById('binFile').files[0].size,
+        },
+      });
+      event.preventDefault();
+    });
 
     listGcodes();
   </script>
@@ -1032,7 +1070,90 @@ void taskWiFi(void *param) {
   server.on("/gcode/remove", HTTP_POST, handleGcodeRemove);
   server.on("/status", HTTP_GET, handleStatus);
   server.begin();
-
+  server.on("/uploadTft", HTTP_POST, 
+      []() {
+        server.sendHeader("Connection", "close");
+        server.send(200, "text/plain", "OK");
+      },
+      []() {
+        byte resBuffer[3];
+        HTTPUpload &upload = server.upload();
+        if (upload.status == UPLOAD_FILE_START) {
+          vTaskSuspend(taskDisplayHandle);
+          String size = server.header("Tft-File-Size");
+          toScreen("whmi-wri " + size + "," + String(NEXTION_BAUDRATE) + ",0");
+          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+        } else if (upload.status == UPLOAD_FILE_WRITE) {  
+          Serial1.write(upload.buf, upload.currentSize);
+          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+        } else if (upload.status == UPLOAD_FILE_END) {
+          Serial1.readBytesUntil(0x88, resBuffer, sizeof(resBuffer) - 1);
+          vTaskResume(taskDisplayHandle);
+        }
+      }
+    );
+  server.on("/uploadBin", HTTP_POST,
+    [&]() {
+      // handler when file upload finishes
+      if (Update.hasError()) {
+        server.send(200, F("text/html"), String(F("<META http-equiv=\"refresh\" content=\"5;URL=/\">Update error: ")) + String(Update.errorString()));
+      } else {
+        server.client().setNoDelay(true);
+        server.send(200, PSTR("text/html"), String(F("<META http-equiv=\"refresh\" content=\"15;URL=/\">Update Success! Rebooting...")));
+        delay(100);
+        server.client().stop();
+        ESP.restart();
+      }
+    },
+    [&]() {
+      // handler for the file upload, gets the sketch bytes, and writes
+      // them through the Update object
+      HTTPUpload &upload = server.upload();
+      if (upload.status == UPLOAD_FILE_START) {
+        vTaskSuspend(taskDisplayHandle);
+        setText("t2", "Uploading " + upload.filename);
+        if (upload.name == "filesystem") {
+          if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {  //start with max available size
+            setText("t2", "upload error");
+          }
+        } else {
+          uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+          if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
+            setText("t2", "upload error");
+          }
+        }
+      } else if (upload.status == UPLOAD_FILE_ABORTED || Update.hasError()) {
+        if (upload.status == UPLOAD_FILE_ABORTED) {
+          if (!Update.end(false)) {
+            setText("t2", "upload error");
+          }
+          setText("t2", "upload aborted");
+        }
+        uploadProgress = "";
+        vTaskResume(taskDisplayHandle);
+      } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (uploadProgress.length() >= 20)
+          uploadProgress = "";
+        uploadProgress += ".";
+        setText("t3", uploadProgress);
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+          setText("t2", "upload write error");
+        }
+      } else if (upload.status == UPLOAD_FILE_END) {
+        if (Update.end(true)) {  //true to set the size to the current progress
+          setText("t2", "Update Success. Rebooting...");
+        } else {
+          setText("t2", "upload write end error");
+        }
+        uploadProgress = "";
+        vTaskResume(taskDisplayHandle);
+      }
+      delay(0);
+    }
+  );
+  
+  server.collectAllHeaders();
+  server.begin();
   webSocket.begin();
   webSocket.onEvent(handleWebSocketEvent);
 
