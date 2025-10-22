@@ -150,9 +150,11 @@ It's early days for H5. For now it works the same as H4, [please read H4 manual 
 - Q disables / enables Z axis
 - O pressed while a number is entered zeroes X from diameter (on H4 this was on `A`)
 
+Handwheels and limits have no effect when GCODE is running.
+
 ## GCode over WiFi for complex parts
 
-Specify your WiFi network name and password in https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L43-L44 and use Win keyboard key to see the IP address NanoEls connected on. Enter that address in the browser to see the Web UI. It can be used to save GCode files onto controller and run them later at the machine in the GCODE mode.
+Specify your WiFi network name and password in https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L45-L46 and use Win keyboard key to see the IP address NanoEls connected on. Enter that address in the browser to see the Web UI. It can be used to save GCode files onto controller and run them later at the machine in the GCODE mode.
 
 To generate GCode for your parts, upload STL model of your part to https://kachurovskiy.com/lathecode/ and specify parameters like stock diameter and tool used.
 
@@ -160,4 +162,4 @@ To generate GCode for your parts, upload STL model of your part to https://kachu
 
 ## Custom keyboard mapping
 
-Use [`#define B_...`](https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L121) constants to adjust key mapping, uncomment [a line](https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L2640) in `void processKeypadEvent()` function to see on Nextion which key code your keyboard sends for any given key.
+Use [`#define B_...`](https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L124) constants to adjust key mapping, uncomment [a line](https://github.com/kachurovskiy/nanoels/blob/main/h5/h5.ino#L3001) in `void processKeypadEvent()` function to see on Nextion which key code your keyboard sends for any given key.
