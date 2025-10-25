@@ -1034,8 +1034,31 @@ void handleGcodeRemove() {
 void handleStatus() {
   server.send(200, "text/plain", "LittleFS.freeSpace=" + String(LittleFS.totalBytes() - LittleFS.usedBytes()) + "\n");
 }
+const String wl_status_to_string(wl_status_t status) {
+  switch (status) {
+    case WL_NO_SHIELD: return "WL_NO_SHIELD";
+    case WL_IDLE_STATUS: return "WL_IDLE_STATUS";
+    case WL_NO_SSID_AVAIL: return "WL_NO_SSID_AVAIL";
+    case WL_SCAN_COMPLETED: return "WL_SCAN_COMPLETED";
+    case WL_CONNECTED: return "WL_CONNECTED";
+    case WL_CONNECT_FAILED: return "WL_CONNECT_FAILED";
+    case WL_CONNECTION_LOST: return "WL_CONNECTION_LOST";
+    case WL_DISCONNECTED: return "WL_DISCONNECTED";
+  }
+}
 
 void taskWiFi(void *param) {
+  // Force b/g/n only (ESP32-S3 supports up to WiFi 4)
+  //esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);  
+  esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+  wifi_country_t country = {
+    .cc = WIFI_COUNTRY,
+    .schan = WIFI_SCHANNEL,
+    .nchan = WIFI_NCHANNEL,
+    .policy = WIFI_COUNTRY_POLICY_MANUAL
+  };
+  esp_wifi_set_country(&country);
+  WiFi.hostname(WIFI_HOSTNAME);
   WiFi.begin(SSID, PASSWORD);
   wifiStatus = "Connecting to WiFi";
   for (int i = 0; i < 40; i++) {
@@ -1053,7 +1076,7 @@ void taskWiFi(void *param) {
     } else if (WiFi.status() == WL_DISCONNECTED) {
       wifiStatus = "WiFi disconnected"; // Likely wrong password
     } else {
-      wifiStatus = "WiFi unknown error";
+      wifiStatus = String(wl_status_to_string(WiFi.status()));
     }
     vTaskDelete(NULL);
     return;

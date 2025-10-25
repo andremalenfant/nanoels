@@ -44,6 +44,10 @@ const char* SSID = "your-wifi-name";
 const char* PASSWORD = "your-password";
 const long INCOMING_BUFFER_SIZE = 100000;
 const long OUTGOING_BUFFER_SIZE = 100000;
+const char* WIFI_HOSTNAME = "nanoELS";
+const char* WIFI_COUNTRY = "CA"
+const long WIFI_SCHANNEL = 1;
+const long WIFI_NCHANNEL = 165;
 
 /* Changing anything below shouldn't be needed for basic use. */
 
