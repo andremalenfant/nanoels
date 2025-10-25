@@ -1069,7 +1069,6 @@ void taskWiFi(void *param) {
   server.on("/gcode/get", HTTP_GET, handleGcodeGet);
   server.on("/gcode/remove", HTTP_POST, handleGcodeRemove);
   server.on("/status", HTTP_GET, handleStatus);
-  server.begin();
   server.on("/uploadTft", HTTP_POST, 
       []() {
         server.sendHeader("Connection", "close");
@@ -1111,39 +1110,39 @@ void taskWiFi(void *param) {
       HTTPUpload &upload = server.upload();
       if (upload.status == UPLOAD_FILE_START) {
         vTaskSuspend(taskDisplayHandle);
-        setText("t2", "Uploading " + upload.filename);
+        setText("t3", "Uploading " + upload.filename);
         if (upload.name == "filesystem") {
           if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {  //start with max available size
-            setText("t2", "upload error");
+            setText("t3", "upload error");
           }
         } else {
           uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
           if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
-            setText("t2", "upload error");
+            setText("t3", "upload error");
           }
         }
       } else if (upload.status == UPLOAD_FILE_ABORTED || Update.hasError()) {
         if (upload.status == UPLOAD_FILE_ABORTED) {
           if (!Update.end(false)) {
-            setText("t2", "upload error");
+            setText("t3", "upload error");
           }
-          setText("t2", "upload aborted");
+          setText("t3", "upload aborted");
         }
         uploadProgress = "";
         vTaskResume(taskDisplayHandle);
       } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (uploadProgress.length() >= 20)
-          uploadProgress = "";
+        if (uploadProgress.length() >= 5)
+          uploadProgress = " ";
         uploadProgress += ".";
-        setText("t3", uploadProgress);
+        setText("t3", "Uploading " + upload.filename + uploadProgress);
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-          setText("t2", "upload write error");
+          setText("t3", "upload write error");
         }
       } else if (upload.status == UPLOAD_FILE_END) {
         if (Update.end(true)) {  //true to set the size to the current progress
-          setText("t2", "Update Success. Rebooting...");
+          setText("t3", "Update Success. Rebooting...");
         } else {
-          setText("t2", "upload write end error");
+          setText("t3", "upload write end error");
         }
         uploadProgress = "";
         vTaskResume(taskDisplayHandle);
