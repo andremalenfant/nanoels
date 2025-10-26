@@ -178,6 +178,10 @@ struct CircleBuffer {
 #include <Preferences.h>
 #include <PS2KeyAdvanced.h> // install via Libraries as "PS2KeyAdvanced"
 
+#include <esp_wifi.h>
+#include <SPIFFS.h>
+#include <Update.h>
+
 const char indexhtml[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
@@ -611,6 +615,12 @@ int starts = 1; // number of starts in a multi-start thread
 int savedStarts = 0; // starts saved in Preferences
 int nextStarts = starts; // number of starts that should be used asap
 bool nextStartsFlag = false; // whether nextStarts requires attention
+
+TaskHandle_t taskDisplayHandle = NULL;
+void setText(const String &id, const String &text);
+void toScreen(const String &command);
+char uploadProgress[7] = "/-\|/-\|";
+int progressIndex = 0;
 
 struct Axis {
   SemaphoreHandle_t mutex;
@@ -1050,13 +1060,13 @@ const String wl_status_to_string(wl_status_t status) {
 void taskWiFi(void *param) {
   // Force b/g/n only (ESP32-S3 supports up to WiFi 4)
   //esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);  
-  esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+  //esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
   wifi_country_t country = {
-    .cc = WIFI_COUNTRY,
     .schan = WIFI_SCHANNEL,
     .nchan = WIFI_NCHANNEL,
     .policy = WIFI_COUNTRY_POLICY_MANUAL
   };
+  strcpy(country.cc, WIFI_COUNTRY);
   esp_wifi_set_country(&country);
   WiFi.hostname(WIFI_HOSTNAME);
   WiFi.begin(SSID, PASSWORD);
@@ -1134,6 +1144,7 @@ void taskWiFi(void *param) {
       if (upload.status == UPLOAD_FILE_START) {
         vTaskSuspend(taskDisplayHandle);
         setText("t3", "Uploading " + upload.filename);
+        progressIndex = 0;
         if (upload.name == "filesystem") {
           if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {  //start with max available size
             setText("t3", "upload error");
@@ -1151,13 +1162,13 @@ void taskWiFi(void *param) {
           }
           setText("t3", "upload aborted");
         }
-        uploadProgress = "";
         vTaskResume(taskDisplayHandle);
       } else if (upload.status == UPLOAD_FILE_WRITE) {
-        if (uploadProgress.length() >= 5)
-          uploadProgress = " ";
-        uploadProgress += ".";
-        setText("t3", "Uploading " + upload.filename + uploadProgress);
+        if (progressIndex > sizeof(uploadProgress))
+          progressIndex = 0;
+        
+        setText("t3", "Uploading " + upload.filename + " " + uploadProgress[progressIndex]);
+        progressIndex++;
         if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
           setText("t3", "upload write error");
         }
@@ -1167,7 +1178,6 @@ void taskWiFi(void *param) {
         } else {
           setText("t3", "upload write end error");
         }
-        uploadProgress = "";
         vTaskResume(taskDisplayHandle);
       }
       delay(0);
@@ -2483,12 +2493,13 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcntConfig.ctrl_gpio_num = gpioB;
   pcntConfig.channel = PCNT_CHANNEL_0;
   pcntConfig.unit = unit;
-  pcntConfig.pos_mode = PCNT_COUNT_INC;
-  pcntConfig.neg_mode = PCNT_COUNT_DEC;
+  pcntConfig.pos_mode = (ENCODER_TYPE == ENCODER_SINGLE) ? PCNT_COUNT_INC : PCNT_COUNT_DEC;
+  pcntConfig.neg_mode = PCNT_COUNT_DIS;
   pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
   pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
   pcntConfig.counter_h_lim = PCNT_LIM;
   pcntConfig.counter_l_lim = -PCNT_LIM;
+
   pcnt_unit_config(&pcntConfig);
   pcnt_set_filter_value(unit, ENCODER_FILTER);
 	pcnt_filter_enable(unit);
@@ -3847,7 +3858,7 @@ void setup() {
   // Non-time-sensitive tasks on core 0.
   delay(1300); // Nextion needs time to boot or first display update will be ignored.
   xTaskCreatePinnedToCore(taskAttachInterrupts, "taskAttachInterrupts", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  xTaskCreatePinnedToCore(taskDisplay, "taskDisplay", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  xTaskCreatePinnedToCore(taskDisplay, "taskDisplay", 10000 /* stack size */, NULL, 0 /* priority */, &taskDisplayHandle, 0 /* core */);
   xTaskCreatePinnedToCore(taskMoveZ, "taskMoveZ", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   xTaskCreatePinnedToCore(taskMoveX, "taskMoveX", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   if (ACTIVE_Y) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
