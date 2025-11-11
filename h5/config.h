@@ -32,7 +32,7 @@ const bool INVERT_Z = false; // change (true/false) if the carriage moves e.g. "
 const bool INVERT_Z_ENABLE = false; // change (true/false) if the Z axis enable pin is inverted
 const bool NEEDS_REST_Z = false; // Set to false for closed-loop drivers, true for open-loop.
 const long MAX_TRAVEL_MM_Z = 300; // Lathe bed doesn't allow to travel more than this in one go, 30cm / ~1 foot
-const long BACKLASH_DU_Z = 2; // 0mm backlash in deci-microns (10^-7 of a meter)
+const long BACKLASH_DU_Z = 5600; //14500; // 0mm backlash in deci-microns (10^-7 of a meter)
 const char NAME_Z = 'Z'; // Text shown on screen before axis position value, GCode axis name
 
 // Cross-slide lead screw (X) parameters.
@@ -95,3 +95,5 @@ const long SAFE_DISTANCE_DU = 5000; // Step back 0.5mm from the material when mo
 const long SAVE_DELAY_US = 5000000; // Wait 5s after last save and last change of saveable data before saving again
 const long DIRECTION_SETUP_DELAY_US = 5; // Stepper driver needs some time to adjust to direction change
 const long STEPPED_ENABLE_DELAY_MS = 100; // Delay after stepper is enabled and before issuing steps
+
+const float X_SCALE_RESOLUTION = 0.005;

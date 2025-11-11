@@ -26,9 +26,13 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define Z_PULSE_A 18
 #define Z_PULSE_B 8
 
+#define Z_JOYSTICK 4
+
 #define X_ENA 16
 #define X_DIR 15
 #define X_STEP 7
+
+#define X_JOYSTICK 5
 
 #define X_PULSE_A 47
 #define X_PULSE_B 21
@@ -37,11 +41,16 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define Y_DIR 2
 #define Y_STEP 17
 
+#define Y_JOYSTICK 6
+
 #define Y_PULSE_A 45
 #define Y_PULSE_B 48
 
 #define KEY_DATA 37
 #define KEY_CLOCK 36
+
+#define X_SCALE_A 40
+#define X_SCALE_B 39
 
 #define B_LEFT 21 // Left arrow - controls Z axis movement to the left
 #define B_RIGHT 22 // Right arrow - controls Z axis movement to the right
@@ -833,6 +842,8 @@ bool timerAttached = false;
 CircleBuffer inBuffer;
 CircleBuffer outBuffer;
 
+int xScaleCount = 0;
+
 bool bufferAvailable(CircleBuffer* b) {
   return b->head != b->tail;
 }
@@ -1473,6 +1484,10 @@ String printNoTrailing0(float value) {
   return String(value, points);
 }
 
+String printXScalePosition() {
+  return String(xScaleCount * X_SCALE_RESOLUTION, 3);
+}
+
 bool needZStops() {
   return mode == MODE_TURN || mode == MODE_FACE || mode == MODE_THREAD || mode == MODE_ELLIPSE;
 }
@@ -1645,7 +1660,7 @@ void updateDisplay() {
     y.pos + y.originPos + y.disabled + y.leftStop - y.rightStop + measure + x.pos % 100;
   if (lcdHashLine2 != newHashLine2) {
     lcdHashLine2 = newHashLine2;
-    setText("tX", !x.active || x.disabled ? "" : printAxisPos(&x));
+    setText("tX", !x.active || x.disabled ? printXScalePosition() : printAxisPos(&x));
     setText("tXUp", !x.active || x.disabled ? "" : printDistanceToLeftStop(&x));
     setText("tXDown", !x.active || x.disabled ? "" : printDistanceToRightStop(&x));
     setText("tY", !y.active || y.disabled ? "" : printAxisPos(&y));
@@ -2511,9 +2526,10 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
 // Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
 void taskAttachInterrupts(void *param) {
   startPulseCounter(PCNT_UNIT_0, ENC_A, ENC_B);
-  startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
+  /*startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
   startPulseCounter(PCNT_UNIT_2, X_PULSE_A, X_PULSE_B);
-  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);
+  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);*/
+  startPulseCounter(PCNT_UNIT_1, X_SCALE_A, X_SCALE_B);
   vTaskDelete(NULL);
 }
 
@@ -3286,9 +3302,51 @@ void processKeypadEvent() {
   }
 }
 
+bool joystickZ = false;
+bool joystickX = false;
+
+void processJoystick() {
+  bool up = false;
+  bool down = false;
+  bool left = false;
+  bool right = false;
+  int zValue = analogReadMilliVolts(Z_JOYSTICK);
+  int xValue = analogReadMilliVolts(X_JOYSTICK);
+
+  if (zValue <= 200) {
+    joystickZ = true;
+    up = true;
+  } else if (zValue >= 3000) {
+    joystickZ = true;
+    down = true;
+  }
+
+  if (xValue <= 200) {
+    joystickX = true;
+    left = true;
+  } else if (xValue >= 3000) {
+    joystickX = true;
+    right = true;
+  }
+
+  if (joystickZ) {
+    buttonUpPressed = up;
+    buttonDownPressed = down;
+  }
+
+  if (joystickX) {
+    buttonLeftPressed = left;
+    buttonRightPressed = right;
+  }
+
+  joystickZ = up || down;
+  joystickX = left || right;
+}
+
 void taskKeypad(void *param) {
   while (emergencyStop == ESTOP_NONE) {
     processKeypadEvent();
+    processJoystick();
     taskYIELD();
   }
   vTaskDelete(NULL);
@@ -3718,6 +3776,15 @@ void processSpindleCounter() {
   }
 }
 
+void processXScaleCounter() {
+  int16_t count;
+  pcnt_get_counter_value(PCNT_UNIT_1, &count);
+  int delta = count - xScaleCount;
+  if (delta == 0) {
+    return;
+  }
+}
+
 // Apply changes requested by the keyboard thread.
 void applySettings() {
   if (nextDuprFlag) {
@@ -3786,6 +3853,9 @@ void setup() {
     pinMode(Y_ENA, OUTPUT);
     DHIGH(Y_STEP);
   }
+
+  pinMode(Z_JOYSTICK, INPUT);
+  pinMode(X_JOYSTICK, INPUT);
 
   Preferences pref;
   pref.begin(PREF_NAMESPACE);
@@ -3875,6 +3945,7 @@ void loop() {
   }
   applySettings();
   processSpindleCounter();
+  processXScaleCounter();
   discountFullSpindleTurns();
   if (!isOn || dupr == 0 || spindlePosSync != 0) {
     // None of the modes work.
