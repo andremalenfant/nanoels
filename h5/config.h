@@ -16,10 +16,6 @@ const int ENCODER_TYPE = ENCODER_SINGLE; // 1 - Single (A channel falling edge c
                             // 4 - fullQuad (falling and rising edges count on both channels)
 const int ENCODER_SPINDLE_RATIO = 4;
 
-// Spindle rotary encoder pins. Swap values if the rotation direction is wrong.
-#define ENC_A 13
-#define ENC_B 14
-
 const long MOTOR_SCREW_RATIO_Z = 3;
 
 // Main lead screw (Z) parameters.

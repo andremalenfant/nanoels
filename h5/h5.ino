@@ -19,6 +19,10 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 // To be changed whenever a different PCB / encoder / stepper / ... design is used.
 #define HARDWARE_VERSION 5
 
+// Spindle rotary encoder pins. Swap values if the rotation direction is wrong.
+#define ENC_A 13
+#define ENC_B 14
+
 #define Z_ENA 41
 #define Z_DIR 42
 #define Z_STEP 35
@@ -3783,6 +3787,7 @@ void processXScaleCounter() {
   if (delta == 0) {
     return;
   }
+  xScaleCount = count;
 }
 
 // Apply changes requested by the keyboard thread.
