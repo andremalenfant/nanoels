@@ -1661,7 +1661,7 @@ void updateDisplay() {
   long newHashLine2 =
     x.pos + x.originPos + x.disabled + x.leftStop - x.rightStop +
     z.pos + z.originPos + z.disabled + z.leftStop - z.rightStop +
-    y.pos + y.originPos + y.disabled + y.leftStop - y.rightStop + measure + x.pos % 100;
+    y.pos + y.originPos + y.disabled + y.leftStop - y.rightStop + measure + x.pos % 100 + xScaleCount;
   if (lcdHashLine2 != newHashLine2) {
     lcdHashLine2 = newHashLine2;
     setText("tX", !x.active || x.disabled ? printXScalePosition() : printAxisPos(&x));
@@ -1897,6 +1897,7 @@ void waitForStep(Axis* a) {
 }
 
 int getAndResetPulses(Axis* a) {
+  if (a->pulseUnit == PCNT_UNIT_MAX) return 0;
   int16_t count;
   pcnt_get_counter_value(a->pulseUnit, &count);
   int delta = count - a->pulseCount;
@@ -2507,6 +2508,7 @@ void taskGcode(void *param) {
 }
 
 void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
+  if (unit == PCNT_UNIT_MAX) return;
   pcnt_config_t pcntConfig;
   pcntConfig.pulse_gpio_num = gpioA;
   pcntConfig.ctrl_gpio_num = gpioB;
@@ -2521,6 +2523,41 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
 
   pcnt_unit_config(&pcntConfig);
   pcnt_set_filter_value(unit, ENCODER_FILTER);
+  pcnt_filter_enable(unit);
+  pcnt_counter_pause(unit);
+  pcnt_counter_clear(unit);
+  pcnt_counter_resume(unit);
+}
+
+void startScaleCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
+  pcnt_config_t pcntConfig;
+  pcntConfig.pulse_gpio_num = gpioA;
+  pcntConfig.ctrl_gpio_num = gpioB;
+  pcntConfig.channel = PCNT_CHANNEL_0;
+  pcntConfig.unit = unit;
+  pcntConfig.pos_mode = PCNT_COUNT_INC;
+  pcntConfig.neg_mode = PCNT_COUNT_DIS;
+  pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
+  pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.counter_h_lim = PCNT_LIM;
+  pcntConfig.counter_l_lim = -PCNT_LIM;
+
+  pcnt_unit_config(&pcntConfig);
+
+/*  pcntConfig.pulse_gpio_num = gpioB;
+  pcntConfig.ctrl_gpio_num = gpioA;
+  pcntConfig.channel = PCNT_CHANNEL_1;
+  pcntConfig.unit = unit;
+  pcntConfig.pos_mode = PCNT_COUNT_INC;
+  pcntConfig.neg_mode = PCNT_COUNT_INC;
+  pcntConfig.lctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.hctrl_mode = PCNT_MODE_REVERSE;
+  pcntConfig.counter_h_lim = PCNT_LIM;
+  pcntConfig.counter_l_lim = -PCNT_LIM;*/
+
+  pcnt_unit_config(&pcntConfig);
+
+  pcnt_set_filter_value(unit, ENCODER_FILTER);
 	pcnt_filter_enable(unit);
   pcnt_counter_pause(unit);
   pcnt_counter_clear(unit);
@@ -2530,10 +2567,10 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
 // Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
 void taskAttachInterrupts(void *param) {
   startPulseCounter(PCNT_UNIT_0, ENC_A, ENC_B);
-  startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
-  startPulseCounter(PCNT_UNIT_2, X_PULSE_A, X_PULSE_B);
-  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);
-  startPulseCounter(PCNT_UNIT_4, X_SCALE_A, X_SCALE_B);
+  startPulseCounter(Z_PULSE_PCNT_UNIT, Z_PULSE_A, Z_PULSE_B);
+  startPulseCounter(X_PULSE_PCNT_UNIT, X_PULSE_A, X_PULSE_B);
+  startPulseCounter(Y_PULSE_PCNT_UNIT, Y_PULSE_A, Y_PULSE_B);
+  startScaleCounter(X_SCALE_PCNT_UNIT, X_SCALE_A, X_SCALE_B);
   vTaskDelete(NULL);
 }
 
@@ -3782,7 +3819,7 @@ void processSpindleCounter() {
 
 void processXScaleCounter() {
   int16_t count;
-  pcnt_get_counter_value(PCNT_UNIT_4, &count);
+  pcnt_get_counter_value(X_SCALE_PCNT_UNIT, &count);
   int delta = count - xScaleCount;
   if (delta == 0) {
     return;
@@ -3869,9 +3906,9 @@ void setup() {
     pref.putInt(PREF_VERSION, PREFERENCES_VERSION);
   }
 
-  initAxis(&z, NAME_Z, true, false, MOTOR_STEPS_Z, SCREW_Z_DU, SPEED_START_Z, SPEED_MANUAL_MOVE_Z, ACCELERATION_Z, INVERT_Z, INVERT_Z_ENABLE, NEEDS_REST_Z, MAX_TRAVEL_MM_Z, BACKLASH_DU_Z, Z_ENA, Z_DIR, Z_STEP, Z_PULSE_A, Z_PULSE_B, PCNT_UNIT_1);
-  initAxis(&x, NAME_X, true, false, MOTOR_STEPS_X, SCREW_X_DU, SPEED_START_X, SPEED_MANUAL_MOVE_X, ACCELERATION_X, INVERT_X, INVERT_X_ENABLE, NEEDS_REST_X, MAX_TRAVEL_MM_X, BACKLASH_DU_X, X_ENA, X_DIR, X_STEP, X_PULSE_A, X_PULSE_B, PCNT_UNIT_2);
-  initAxis(&y, NAME_Y, ACTIVE_Y, ROTARY_Y, MOTOR_STEPS_Y, SCREW_Y_DU, SPEED_START_Y, SPEED_MANUAL_MOVE_Y, ACCELERATION_Y, INVERT_Y, INVERT_Y_ENABLE, NEEDS_REST_Y, MAX_TRAVEL_MM_Y, BACKLASH_DU_Y, Y_ENA, Y_DIR, Y_STEP, Y_PULSE_A, Y_PULSE_B, PCNT_UNIT_3);
+  initAxis(&z, NAME_Z, true, false, MOTOR_STEPS_Z, SCREW_Z_DU, SPEED_START_Z, SPEED_MANUAL_MOVE_Z, ACCELERATION_Z, INVERT_Z, INVERT_Z_ENABLE, NEEDS_REST_Z, MAX_TRAVEL_MM_Z, BACKLASH_DU_Z, Z_ENA, Z_DIR, Z_STEP, Z_PULSE_A, Z_PULSE_B, Z_PULSE_PCNT_UNIT);
+  initAxis(&x, NAME_X, true, false, MOTOR_STEPS_X, SCREW_X_DU, SPEED_START_X, SPEED_MANUAL_MOVE_X, ACCELERATION_X, INVERT_X, INVERT_X_ENABLE, NEEDS_REST_X, MAX_TRAVEL_MM_X, BACKLASH_DU_X, X_ENA, X_DIR, X_STEP, X_PULSE_A, X_PULSE_B, X_PULSE_PCNT_UNIT);
+  initAxis(&y, NAME_Y, ACTIVE_Y, ROTARY_Y, MOTOR_STEPS_Y, SCREW_Y_DU, SPEED_START_Y, SPEED_MANUAL_MOVE_Y, ACCELERATION_Y, INVERT_Y, INVERT_Y_ENABLE, NEEDS_REST_Y, MAX_TRAVEL_MM_Y, BACKLASH_DU_Y, Y_ENA, Y_DIR, Y_STEP, Y_PULSE_A, Y_PULSE_B, Y_PULSE_PCNT_UNIT);
 
   isOn = false;
   savedDupr = dupr = pref.getLong(PREF_DUPR);
