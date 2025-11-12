@@ -3317,6 +3317,8 @@ void processJoystick() {
   int zValue = analogReadMilliVolts(Z_JOYSTICK);
   int xValue = analogReadMilliVolts(X_JOYSTICK);
 
+  Serial.printf("z: %d,x: %d\n", zValue, xValue);
+
   if (zValue <= 200) {
     joystickZ = true;
     up = true;
