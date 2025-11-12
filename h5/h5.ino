@@ -2530,10 +2530,10 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
 // Attaching interrupt on core 0 to have more time on core 1 where axes are moved.
 void taskAttachInterrupts(void *param) {
   startPulseCounter(PCNT_UNIT_0, ENC_A, ENC_B);
-  /*startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
+  startPulseCounter(PCNT_UNIT_1, Z_PULSE_A, Z_PULSE_B);
   startPulseCounter(PCNT_UNIT_2, X_PULSE_A, X_PULSE_B);
-  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);*/
-  startPulseCounter(PCNT_UNIT_1, X_SCALE_A, X_SCALE_B);
+  startPulseCounter(PCNT_UNIT_3, Y_PULSE_A, Y_PULSE_B);
+  startPulseCounter(PCNT_UNIT_4, X_SCALE_A, X_SCALE_B);
   vTaskDelete(NULL);
 }
 
@@ -3317,8 +3317,6 @@ void processJoystick() {
   int zValue = analogReadMilliVolts(Z_JOYSTICK);
   int xValue = analogReadMilliVolts(X_JOYSTICK);
 
-  Serial.printf("z: %d,x: %d\n", zValue, xValue);
-
   if (zValue <= 200) {
     joystickZ = true;
     up = true;
@@ -3784,7 +3782,7 @@ void processSpindleCounter() {
 
 void processXScaleCounter() {
   int16_t count;
-  pcnt_get_counter_value(PCNT_UNIT_1, &count);
+  pcnt_get_counter_value(PCNT_UNIT_4, &count);
   int delta = count - xScaleCount;
   if (delta == 0) {
     return;
