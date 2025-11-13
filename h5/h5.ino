@@ -2575,6 +2575,16 @@ void taskAttachInterrupts(void *param) {
   vTaskDelete(NULL);
 }
 
+void zeroXScale() {
+  if (!x.active || x.disabled) {
+    pcnt_counter_pause(X_SCALE_PCNT_UNIT);
+    pcnt_counter_clear(X_SCALE_PCNT_UNIT);
+    xScaleCount = 0;
+    pcnt_counter_resume(X_SCALE_PCNT_UNIT);
+  }
+}
+
+
 void setDupr(long value) {
   // Can't apply changes right away since we might be in the middle of motion logic.
   nextDupr = value;
@@ -3299,6 +3309,7 @@ void processKeypadEvent() {
     buttonDisplayPress();
   } else if (keyCode == B_X) {
     markAxis0(&x);
+    zeroXScale();
   } else if (keyCode == B_Z) {
     markAxis0(&z);
   } else if (keyCode == B_Y && ACTIVE_Y) {
