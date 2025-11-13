@@ -2531,29 +2531,30 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
 
 void startScaleCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcnt_config_t pcntConfig;
+  
   pcntConfig.pulse_gpio_num = gpioA;
   pcntConfig.ctrl_gpio_num = gpioB;
   pcntConfig.channel = PCNT_CHANNEL_0;
-  pcntConfig.unit = unit;
-  pcntConfig.pos_mode = PCNT_COUNT_INC;
-  pcntConfig.neg_mode = PCNT_COUNT_DIS;
-  pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
+  pcntConfig.unit = unit; 
+  pcntConfig.pos_mode = PCNT_COUNT_DEC;
+  pcntConfig.neg_mode = PCNT_COUNT_INC;
   pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
   pcntConfig.counter_h_lim = PCNT_LIM;
   pcntConfig.counter_l_lim = -PCNT_LIM;
 
   pcnt_unit_config(&pcntConfig);
 
-/*  pcntConfig.pulse_gpio_num = gpioB;
+  pcntConfig.pulse_gpio_num = gpioB;
   pcntConfig.ctrl_gpio_num = gpioA;
   pcntConfig.channel = PCNT_CHANNEL_1;
   pcntConfig.unit = unit;
   pcntConfig.pos_mode = PCNT_COUNT_INC;
-  pcntConfig.neg_mode = PCNT_COUNT_INC;
-  pcntConfig.lctrl_mode = PCNT_MODE_KEEP;
-  pcntConfig.hctrl_mode = PCNT_MODE_REVERSE;
+  pcntConfig.neg_mode = PCNT_COUNT_DEC;
+  pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
+  pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
   pcntConfig.counter_h_lim = PCNT_LIM;
-  pcntConfig.counter_l_lim = -PCNT_LIM;*/
+  pcntConfig.counter_l_lim = -PCNT_LIM;
 
   pcnt_unit_config(&pcntConfig);
 
