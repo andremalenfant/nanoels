@@ -143,6 +143,7 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define PREF_TURN_PASSES "tp"
 #define PREF_MOVE_STEP "ms"
 #define PREF_AUX_FORWARD "af"
+#define PREF_X_SCALE_COUNT "xsc"
 
 #define MOVE_STEP_1 10000 // 1mm
 #define MOVE_STEP_2 1000 // 0.1mm
@@ -181,6 +182,8 @@ struct CircleBuffer {
   size_t tail;
   size_t size;
 };
+
+#define HTTP_UPLOAD_BUFLEN 4096
 
 #include <FS.h>
 #include <LittleFS.h>
@@ -847,6 +850,7 @@ CircleBuffer inBuffer;
 CircleBuffer outBuffer;
 
 int xScaleCount = 0;
+int savedXScaleCount = 0;
 
 bool bufferAvailable(CircleBuffer* b) {
   return b->head != b->tail;
@@ -1771,7 +1775,7 @@ bool saveIfChanged() {
       spindlePos == savedSpindlePos && spindlePosAvg == savedSpindlePosAvg && spindlePosSync == savedSpindlePosSync && savedSpindlePosGlobal == spindlePosGlobal && showAngle == savedShowAngle && showTacho == savedShowTacho && moveStep == savedMoveStep &&
       mode == savedMode && measure == savedMeasure && x.pos == x.savedPos && x.originPos == x.savedOriginPos && x.posGlobal == x.savedPosGlobal && x.motorPos == x.savedMotorPos && x.leftStop == x.savedLeftStop && x.rightStop == x.savedRightStop && x.disabled == x.savedDisabled &&
       y.pos == y.savedPos && y.originPos == y.savedOriginPos && y.posGlobal == y.savedPosGlobal && y.motorPos == y.savedMotorPos && y.leftStop == y.savedLeftStop && y.rightStop == y.savedRightStop && y.disabled == y.savedDisabled &&
-      coneRatio == savedConeRatio && turnPasses == savedTurnPasses && savedAuxForward == auxForward) return false;
+      coneRatio == savedConeRatio && turnPasses == savedTurnPasses && savedAuxForward == auxForward && xScaleCount == savedXScaleCount) return false;
 
   Preferences pref;
   pref.begin(PREF_NAMESPACE);
@@ -1810,6 +1814,7 @@ bool saveIfChanged() {
   if (coneRatio != savedConeRatio) pref.putFloat(PREF_CONE_RATIO, savedConeRatio = coneRatio);
   if (turnPasses != savedTurnPasses) pref.putInt(PREF_TURN_PASSES, savedTurnPasses = turnPasses);
   if (auxForward != savedAuxForward) pref.putBool(PREF_AUX_FORWARD, savedAuxForward = auxForward);
+  if (xScaleCount != savedXScaleCount) pref.putInt(PREF_X_SCALE_COUNT, savedXScaleCount = xScaleCount);
   pref.end();
   return true;
 }
@@ -3959,6 +3964,7 @@ void setup() {
   savedConeRatio = coneRatio = pref.getFloat(PREF_CONE_RATIO, coneRatio);
   savedTurnPasses = turnPasses = pref.getInt(PREF_TURN_PASSES, turnPasses);
   savedAuxForward = auxForward = pref.getBool(PREF_AUX_FORWARD, true);
+  savedXScaleCount = xScaleCount = pref.getInt(PREF_X_SCALE_COUNT, xScaleCount);
   pref.end();
 
   if (!z.needsRest && !z.disabled) digitalWrite(z.ena, z.invertEnable ? LOW : HIGH);
