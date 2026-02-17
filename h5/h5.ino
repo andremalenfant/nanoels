@@ -30,13 +30,15 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define Z_PULSE_A 18
 #define Z_PULSE_B 8
 
-#define Z_JOYSTICK 4
+#define JOYSTICK_I2C_ADDRESS 0x48
+#define JOYSTICK_SDA 5
+#define JOYSTICK_SCL 6
+#define X_JOYSTICK ADS1115_COMP_0_GND
+#define Z_JOYSTICK ADS1115_COMP_1_GND
 
 #define X_ENA 16
 #define X_DIR 15
 #define X_STEP 7
-
-#define X_JOYSTICK 5
 
 #define X_PULSE_A 47
 #define X_PULSE_B 21
@@ -44,8 +46,6 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define Y_ENA 1
 #define Y_DIR 2
 #define Y_STEP 17
-
-#define Y_JOYSTICK 6
 
 #define Y_PULSE_A 45
 #define Y_PULSE_B 48
@@ -55,6 +55,9 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 
 #define X_SCALE_A 40
 #define X_SCALE_B 39
+
+#define Z_SCALE_A 9
+#define Z_SCALE_B 12
 
 #define B_LEFT 21 // Left arrow - controls Z axis movement to the left
 #define B_RIGHT 22 // Right arrow - controls Z axis movement to the right
@@ -144,6 +147,7 @@ const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 #define PREF_MOVE_STEP "ms"
 #define PREF_AUX_FORWARD "af"
 #define PREF_X_SCALE_COUNT "xsc"
+#define PREF_Z_SCALE_COUNT "zsc"
 
 #define MOVE_STEP_1 10000 // 1mm
 #define MOVE_STEP_2 1000 // 0.1mm
@@ -183,8 +187,6 @@ struct CircleBuffer {
   size_t size;
 };
 
-#define HTTP_UPLOAD_BUFLEN 4096
-
 #include <FS.h>
 #include <LittleFS.h>
 #include <WiFi.h>
@@ -197,6 +199,14 @@ struct CircleBuffer {
 #include <esp_wifi.h>
 #include <SPIFFS.h>
 #include <Update.h>
+
+#include<ADS1115_WE.h> 
+#include<Wire.h>
+
+#include "esp_system.h"
+#include "soc/rtc_cntl_reg.h"
+
+ADS1115_WE adc = ADS1115_WE(JOYSTICK_I2C_ADDRESS);
 
 const char indexhtml[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -594,6 +604,7 @@ long lcdHashLine0 = LCD_HASH_INITIAL;
 long lcdHashLine1 = LCD_HASH_INITIAL;
 long lcdHashLine2 = LCD_HASH_INITIAL;
 long lcdHashLine3 = LCD_HASH_INITIAL;
+long lcdHashLineAxis = LCD_HASH_INITIAL;
 bool splashScreen = false;
 
 unsigned long keypadTimeUs = 0;
@@ -637,6 +648,8 @@ void setText(const String &id, const String &text);
 void toScreen(const String &command);
 char uploadProgress[7] = "/-\|/-\|";
 int progressIndex = 0;
+int tftBufCurrentSize = 0;
+uint8_t tftBuf[4096];
 
 struct Axis {
   SemaphoreHandle_t mutex;
@@ -851,6 +864,10 @@ CircleBuffer outBuffer;
 
 int xScaleCount = 0;
 int savedXScaleCount = 0;
+
+int zScaleCount = 0;
+int savedZScaleCount = 0;
+
 
 bool bufferAvailable(CircleBuffer* b) {
   return b->head != b->tail;
@@ -1124,7 +1141,7 @@ void taskWiFi(void *param) {
   server.on("/uploadTft", HTTP_POST, 
       []() {
         server.sendHeader("Connection", "close");
-        server.send(200, "text/plain", "OK");
+        server.send(200, "text/plain", "OK"); 
       },
       []() {
         byte resBuffer[3];
@@ -1134,10 +1151,45 @@ void taskWiFi(void *param) {
           String size = server.header("Tft-File-Size");
           toScreen("whmi-wri " + size + "," + String(NEXTION_BAUDRATE) + ",0");
           Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
-        } else if (upload.status == UPLOAD_FILE_WRITE) {  
+        } else if (upload.status == UPLOAD_FILE_WRITE) {
           Serial1.write(upload.buf, upload.currentSize);
-          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+          Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);  
+/*          Serial.printf("bufferSize=%d,uploadSize=%d\n", tftBufCurrentSize, upload.currentSize);
+          if (tftBufCurrentSize + upload.currentSize == 4096) {
+            Serial.println("tftBufCurrentSize + upload.currentSize == 4096");
+            memcpy(&tftBuf, &upload.buf, upload.currentSize);
+            Serial1.write(tftBuf, 4096);
+            Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+            tftBufCurrentSize = 0;
+            Serial.printf("new buffersize=%d", tftBufCurrentSize);
+          } else if (tftBufCurrentSize + upload.currentSize > 4096) {
+            int spaceleft = 4096 - tftBufCurrentSize;
+            int remainder = upload.currentSize - spaceleft;
+            Serial.printf("tftBufCurrentSize + upload.currentSize > 4096 spaceleft=%d remainder=%d\n", spaceleft, remainder);
+            memcpy(&tftBuf + tftBufCurrentSize, &upload.buf, spaceleft);
+            Serial1.write(tftBuf, 4096);
+            Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+            memcpy(&tftBuf,  &upload.buf + spaceleft, remainder);
+            tftBufCurrentSize = remainder;
+            Serial.printf("new buffersize=%d", tftBufCurrentSize);
+          } else {
+            Serial.println("else");
+            memcpy(&tftBuf + tftBufCurrentSize, &upload.buf, upload.currentSize);
+            tftBufCurrentSize = tftBufCurrentSize + upload.currentSize;
+            Serial.printf("new buffersize=%d\n", tftBufCurrentSize);
+            if (tftBufCurrentSize == 4096) {
+              Serial1.write(tftBuf, 4096);
+              Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+              tftBufCurrentSize = 0;
+            }
+          }*/
         } else if (upload.status == UPLOAD_FILE_END) {
+           //Serial.println("end file");
+          /*if (tftBufCurrentSize > 0) {
+              Serial.printf("writing remaining data bufferSize=%d\n", tftBufCurrentSize);
+              Serial1.write(tftBuf, tftBufCurrentSize);
+              Serial1.readBytesUntil(0x05, resBuffer, sizeof(resBuffer) - 1);
+          }*/
           Serial1.readBytesUntil(0x88, resBuffer, sizeof(resBuffer) - 1);
           vTaskResume(taskDisplayHandle);
         }
@@ -1164,13 +1216,13 @@ void taskWiFi(void *param) {
         vTaskSuspend(taskDisplayHandle);
         setText("t3", "Uploading " + upload.filename);
         progressIndex = 0;
+        String size = server.header("bin-file-size");
         if (upload.name == "filesystem") {
           if (!Update.begin(SPIFFS.totalBytes(), U_SPIFFS)) {  //start with max available size
             setText("t3", "upload error");
           }
         } else {
-          uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
-          if (!Update.begin(maxSketchSpace, U_FLASH)) {  //start with max available size
+          if (!Update.begin(size.toInt(), U_FLASH)) {  //start with max available size
             setText("t3", "upload error");
           }
         }
@@ -1192,7 +1244,7 @@ void taskWiFi(void *param) {
           setText("t3", "upload write error");
         }
       } else if (upload.status == UPLOAD_FILE_END) {
-        if (Update.end(true)) {  //true to set the size to the current progress
+        if (Update.end(false)) {  //true to set the size to the current progress
           setText("t3", "Update Success. Rebooting...");
         } else {
           setText("t3", "upload write end error");
@@ -1496,6 +1548,10 @@ String printXScalePosition() {
   return String(xScaleCount * X_SCALE_RESOLUTION, 3);
 }
 
+String printZScalePosition() {
+  return String(zScaleCount * Z_SCALE_RESOLUTION, 3);
+}
+
 bool needZStops() {
   return mode == MODE_TURN || mode == MODE_FACE || mode == MODE_THREAD || mode == MODE_ELLIPSE;
 }
@@ -1665,7 +1721,7 @@ void updateDisplay() {
   long newHashLine2 =
     x.pos + x.originPos + x.disabled + x.leftStop - x.rightStop +
     z.pos + z.originPos + z.disabled + z.leftStop - z.rightStop +
-    y.pos + y.originPos + y.disabled + y.leftStop - y.rightStop + measure + x.pos % 100 + xScaleCount;
+    y.pos + y.originPos + y.disabled + y.leftStop - y.rightStop + measure + x.pos % 100 + xScaleCount + zScaleCount;
   if (lcdHashLine2 != newHashLine2) {
     lcdHashLine2 = newHashLine2;
     setText("tX", !x.active || x.disabled ? printXScalePosition() : printAxisPos(&x));
@@ -1674,9 +1730,17 @@ void updateDisplay() {
     setText("tY", !y.active || y.disabled ? "" : printAxisPos(&y));
     setText("tYUp", !y.active || y.disabled ? "" : printDistanceToLeftStop(&y));
     setText("tYDown", !y.active || y.disabled ? "" : printDistanceToRightStop(&y));
-    setText("tZ", !z.active || z.disabled ? "" : printAxisPos(&z));
+    setText("tZ", !z.active || z.disabled ? printZScalePosition() : printAxisPos(&z));
     setText("tZLeft", !z.active || z.disabled ? "" : printDistanceToLeftStop(&z));
     setText("tZRight", !z.active || z.disabled ? "" : printDistanceToRightStop(&z));
+  }
+
+  long newHashLineAxis = z.active + z.disabled + x.active + x.disabled + y.active + y.disabled;
+  if (lcdHashLineAxis != newHashLineAxis) {
+    lcdHashLineAxis = newHashLineAxis;
+    setText("bZ", !z.active || z.disabled ? "Z DISABLED" : "Z");
+    setText("bX", !x.active || x.disabled ? "X DISABLED" : "X");
+    setText("bY", !y.active || y.disabled ? "Y DISABLED" : "Y");
   }
 
   long numpadResult = getNumpadResult();
@@ -1775,7 +1839,7 @@ bool saveIfChanged() {
       spindlePos == savedSpindlePos && spindlePosAvg == savedSpindlePosAvg && spindlePosSync == savedSpindlePosSync && savedSpindlePosGlobal == spindlePosGlobal && showAngle == savedShowAngle && showTacho == savedShowTacho && moveStep == savedMoveStep &&
       mode == savedMode && measure == savedMeasure && x.pos == x.savedPos && x.originPos == x.savedOriginPos && x.posGlobal == x.savedPosGlobal && x.motorPos == x.savedMotorPos && x.leftStop == x.savedLeftStop && x.rightStop == x.savedRightStop && x.disabled == x.savedDisabled &&
       y.pos == y.savedPos && y.originPos == y.savedOriginPos && y.posGlobal == y.savedPosGlobal && y.motorPos == y.savedMotorPos && y.leftStop == y.savedLeftStop && y.rightStop == y.savedRightStop && y.disabled == y.savedDisabled &&
-      coneRatio == savedConeRatio && turnPasses == savedTurnPasses && savedAuxForward == auxForward && xScaleCount == savedXScaleCount) return false;
+      coneRatio == savedConeRatio && turnPasses == savedTurnPasses && savedAuxForward == auxForward && xScaleCount == savedXScaleCount && zScaleCount == savedZScaleCount) return false;
 
   Preferences pref;
   pref.begin(PREF_NAMESPACE);
@@ -1815,6 +1879,7 @@ bool saveIfChanged() {
   if (turnPasses != savedTurnPasses) pref.putInt(PREF_TURN_PASSES, savedTurnPasses = turnPasses);
   if (auxForward != savedAuxForward) pref.putBool(PREF_AUX_FORWARD, savedAuxForward = auxForward);
   if (xScaleCount != savedXScaleCount) pref.putInt(PREF_X_SCALE_COUNT, savedXScaleCount = xScaleCount);
+  if (zScaleCount != savedZScaleCount) pref.putInt(PREF_Z_SCALE_COUNT, savedZScaleCount = zScaleCount);
   pref.end();
   return true;
 }
@@ -2519,7 +2584,7 @@ void startPulseCounter(pcnt_unit_t unit, int gpioA, int gpioB) {
   pcntConfig.ctrl_gpio_num = gpioB;
   pcntConfig.channel = PCNT_CHANNEL_0;
   pcntConfig.unit = unit;
-  pcntConfig.pos_mode = (ENCODER_TYPE == ENCODER_SINGLE) ? PCNT_COUNT_INC : PCNT_COUNT_DEC;
+  pcntConfig.pos_mode = PCNT_COUNT_DEC;
   pcntConfig.neg_mode = PCNT_COUNT_DIS;
   pcntConfig.lctrl_mode = PCNT_MODE_REVERSE;
   pcntConfig.hctrl_mode = PCNT_MODE_KEEP;
@@ -2577,6 +2642,7 @@ void taskAttachInterrupts(void *param) {
   startPulseCounter(X_PULSE_PCNT_UNIT, X_PULSE_A, X_PULSE_B);
   startPulseCounter(Y_PULSE_PCNT_UNIT, Y_PULSE_A, Y_PULSE_B);
   startScaleCounter(X_SCALE_PCNT_UNIT, X_SCALE_A, X_SCALE_B);
+  startScaleCounter(Z_SCALE_PCNT_UNIT, Z_SCALE_A, Z_SCALE_B);
   vTaskDelete(NULL);
 }
 
@@ -2586,6 +2652,15 @@ void zeroXScale() {
     pcnt_counter_clear(X_SCALE_PCNT_UNIT);
     xScaleCount = 0;
     pcnt_counter_resume(X_SCALE_PCNT_UNIT);
+  }
+}
+
+void zeroZScale() {
+  if (!x.active || x.disabled) {
+    pcnt_counter_pause(Z_SCALE_PCNT_UNIT);
+    pcnt_counter_clear(Z_SCALE_PCNT_UNIT);
+    zScaleCount = 0;
+    pcnt_counter_resume(Z_SCALE_PCNT_UNIT);
   }
 }
 
@@ -3184,6 +3259,12 @@ const byte HEX_TO_KEYCODE[256] = {
 
 int processNextionMessage() {
   if (nextionBufferIndex < 6) return 0;
+  if (nextionBuffer[0] == 0x65 && nextionBuffer[1] == 0x01) {
+    if (nextionBuffer[2] == 0x03) {
+      REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+      esp_restart();      
+    }
+  }
   if (nextionBuffer[0] == 0x65 && nextionBuffer[1] == 0x00) {
     int code = HEX_TO_KEYCODE[nextionBuffer[2]];
     if (nextionBuffer[3] == 0) code |= PS2_BREAK;
@@ -3317,6 +3398,7 @@ void processKeypadEvent() {
     zeroXScale();
   } else if (keyCode == B_Z) {
     markAxis0(&z);
+    zeroZScale();
   } else if (keyCode == B_Y && ACTIVE_Y) {
     markAxis0(&y);
   } else if (keyCode == B_X_ENA) {
@@ -3368,8 +3450,13 @@ void processJoystick() {
   bool down = false;
   bool left = false;
   bool right = false;
-  int zValue = analogReadMilliVolts(Z_JOYSTICK);
-  int xValue = analogReadMilliVolts(X_JOYSTICK);
+
+  adc.setCompareChannels(Z_JOYSTICK);
+  int zValue = adc.getResult_mV();
+
+  adc.setCompareChannels(X_JOYSTICK);
+  int xValue = adc.getResult_mV();
+
 
   if (zValue <= 200) {
     joystickZ = true;
@@ -3802,6 +3889,8 @@ void processSpindleCounter() {
     spindleCount = count;
   }
 
+  //setText("t0", String(spindleCount));
+
   unsigned long microsNow = micros();
   if (spindleEncTimeIndex >= RPM_BULK) {
     spindleEncTimeDiffBulk = microsNow - spindleEncTimeAtIndex0;
@@ -3842,6 +3931,16 @@ void processXScaleCounter() {
     return;
   }
   xScaleCount = count;
+}
+
+void processZScaleCounter() {
+  int16_t count;
+  pcnt_get_counter_value(Z_SCALE_PCNT_UNIT, &count);
+  int delta = count - zScaleCount;
+  if (delta == 0) {
+    return;
+  }
+  zScaleCount = count;
 }
 
 // Apply changes requested by the keyboard thread.
@@ -3913,8 +4012,12 @@ void setup() {
     DHIGH(Y_STEP);
   }
 
-  pinMode(Z_JOYSTICK, INPUT);
-  pinMode(X_JOYSTICK, INPUT);
+  Wire.begin(JOYSTICK_SDA, JOYSTICK_SCL);
+  adc.setVoltageRange_mV(ADS1115_RANGE_4096);
+  adc.setCompareChannels(ADS1115_COMP_0_GND);
+  adc.setConvRate(ADS1115_860_SPS);
+  adc.setMeasureMode(ADS1115_CONTINUOUS);
+
 
   Preferences pref;
   pref.begin(PREF_NAMESPACE);
@@ -3965,6 +4068,7 @@ void setup() {
   savedTurnPasses = turnPasses = pref.getInt(PREF_TURN_PASSES, turnPasses);
   savedAuxForward = auxForward = pref.getBool(PREF_AUX_FORWARD, true);
   savedXScaleCount = xScaleCount = pref.getInt(PREF_X_SCALE_COUNT, xScaleCount);
+  savedZScaleCount = zScaleCount = pref.getInt(PREF_Z_SCALE_COUNT, zScaleCount);
   pref.end();
 
   if (!z.needsRest && !z.disabled) digitalWrite(z.ena, z.invertEnable ? LOW : HIGH);
@@ -3976,11 +4080,12 @@ void setup() {
   }
 
   // Debug.
-  Serial.begin(115200);
+  //Serial.begin(115200);
+  //Serial.begin(115200, SERIAL_8N1, 11, 10);
 
   // Nextion.
-  Serial1.begin(115200, SERIAL_8N1, 44, 43);
-
+  Serial1.begin(NEXTION_BAUDRATE, SERIAL_8N1, 44, 43);
+  
   // Initialize the keyboard.
   keyboard.begin(KEY_DATA, KEY_CLOCK);
   xTaskCreatePinnedToCore(taskKeypad, "taskKeypad", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
@@ -3993,7 +4098,7 @@ void setup() {
   xTaskCreatePinnedToCore(taskMoveX, "taskMoveX", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   if (ACTIVE_Y) xTaskCreatePinnedToCore(taskMoveY, "taskMoveY", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
   xTaskCreatePinnedToCore(taskGcode, "taskGcode", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
-  if (WIFI_ENABLED) xTaskCreatePinnedToCore(taskWiFi, "taskWiFI", 10000 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
+  if (WIFI_ENABLED) xTaskCreatePinnedToCore(taskWiFi, "taskWiFI", 32768 /* stack size */, NULL, 0 /* priority */, NULL, 0 /* core */);
 }
 
 void loop() {
@@ -4006,6 +4111,7 @@ void loop() {
   applySettings();
   processSpindleCounter();
   processXScaleCounter();
+  processZScaleCounter();
   discountFullSpindleTurns();
   if (!isOn || dupr == 0 || spindlePosSync != 0) {
     // None of the modes work.

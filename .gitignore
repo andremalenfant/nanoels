@@ -3,11 +3,12 @@
 */esp32s3.svd
 h4/single_axis_manual*
 **/*.FCStd1
-<<<<<<< Updated upstream
-/h5/.vscode
-/h5/build
-=======
 /*/build
 /*/.vscode
->>>>>>> Stashed changes
 /h5/.theia
+/build/*
+h1/*
+h2/*
+h3/*
+h4/*
+

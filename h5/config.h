@@ -2,9 +2,9 @@
 
 #include <driver/pcnt.h>
 
-#define NEXTION_BAUDRATE 115200
+//#define NEXTION_BAUDRATE 115200
 //#define NEXTION_BAUDRATE 250000
-//#define NEXTION_BAUDRATE 921600
+#define NEXTION_BAUDRATE 921600
 
 #define ENCODER_SINGLE 1
 #define ENCODER_HALF 2
@@ -83,7 +83,7 @@ const char NAME_Y = 'Y'; // Text shown on screen before axis position value, GCo
 const float PULSE_PER_REVOLUTION = 600; // PPR of handwheels.
 
 const int ENCODER_STEPS_INT = ENCODER_PPR * ENCODER_TYPE * ENCODER_SPINDLE_RATIO; // Number of encoder impulses PCNT counts per revolution of the spindle
-const int ENCODER_FILTER = 1; // Encoder pulses shorter than this will be ignored. Clock cycles, 1 - 1023.
+const int ENCODER_FILTER = 10; // Encoder pulses shorter than this will be ignored. Clock cycles, 1 - 1023.
 const int PCNT_LIM = 31000; // Limit used in hardware pulse counter logic.
 const int PCNT_CLEAR = 30000; // Limit where we reset hardware pulse counter value to avoid overflow. Less than PCNT_LIM.
 const long DUPR_MAX = 254000; // No more than 1 inch pitch
@@ -95,7 +95,9 @@ const long DIRECTION_SETUP_DELAY_US = 5; // Stepper driver needs some time to ad
 const long STEPPED_ENABLE_DELAY_MS = 100; // Delay after stepper is enabled and before issuing steps
 
 const float X_SCALE_RESOLUTION = 0.005;
+const float Z_SCALE_RESOLUTION = 0.005;
 const pcnt_unit_t X_SCALE_PCNT_UNIT = PCNT_UNIT_1;
+const pcnt_unit_t Z_SCALE_PCNT_UNIT = PCNT_UNIT_2;
 const pcnt_unit_t X_PULSE_PCNT_UNIT = PCNT_UNIT_MAX;
 const pcnt_unit_t Y_PULSE_PCNT_UNIT = PCNT_UNIT_MAX;
 const pcnt_unit_t Z_PULSE_PCNT_UNIT = PCNT_UNIT_MAX;
