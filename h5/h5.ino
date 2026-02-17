@@ -14,7 +14,7 @@ const bool SPINDLE_PAUSES_GCODE = true; // pause GCode execution when spindle st
 const int GCODE_MIN_RPM = 30; // pause GCode execution if RPM is below this
 
 // To be incremented whenever a measurable improvement is made.
-#define SOFTWARE_VERSION 11
+#define SOFTWARE_VERSION 14
 
 // To be changed whenever a different PCB / encoder / stepper / ... design is used.
 #define HARDWARE_VERSION 5
@@ -807,7 +807,7 @@ bool savedShowTacho = false; // showTacho value saved in Preferences
 int shownRpm = 0;
 unsigned long shownRpmTime = 0; // micros() when shownRpm was set
 
-long moveStep = 0; // thousandth of a mm
+long moveStep = 0; // in deci-microns
 long savedMoveStep = 0; // moveStep saved in Preferences
 
 volatile int mode = -1; // mode of operation (ELS, multi-start ELS, asynchronous)
@@ -924,7 +924,8 @@ void clearBuffer(CircleBuffer* b) {
 
 WebServer server(80);
 WebSocketsServer webSocket(81);
-String wifiStatus = "WiFi not connected";
+String wifiStatus = "No WiFi";
+unsigned long wifiStatusMillis = 0;
 
 void handleWebSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
   if (type == WStype_TEXT) {
@@ -1093,6 +1094,11 @@ const String wl_status_to_string(wl_status_t status) {
   }
 }
 
+void setWiFiStatus(const String& status) {
+  wifiStatus = status;
+  wifiStatusMillis = millis();
+}
+
 void taskWiFi(void *param) {
   // Force b/g/n only (ESP32-S3 supports up to WiFi 4)
   //esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);  
@@ -1106,7 +1112,7 @@ void taskWiFi(void *param) {
   esp_wifi_set_country(&country);
   WiFi.hostname(WIFI_HOSTNAME);
   WiFi.begin(SSID, PASSWORD);
-  wifiStatus = "Connecting to WiFi";
+  setWiFiStatus("Connecting");
   for (int i = 0; i < 40; i++) {
     if (WiFi.status() == WL_CONNECTED) break;
     DELAY(500);
@@ -1114,20 +1120,20 @@ void taskWiFi(void *param) {
   }
   if (WiFi.status() != WL_CONNECTED) {
     if (WiFi.status() == WL_NO_SSID_AVAIL) {
-      wifiStatus = "No SSID available";
+      setWiFiStatus("No SSID");
     } else if (WiFi.status() == WL_CONNECT_FAILED) {
-      wifiStatus = "WiFi connection failed";
+      setWiFiStatus("WiFi failed");
     } else if (WiFi.status() == WL_CONNECTION_LOST) {
-      wifiStatus = "WiFi connection lost";
+      setWiFiStatus("WiFi lost");
     } else if (WiFi.status() == WL_DISCONNECTED) {
-      wifiStatus = "WiFi disconnected"; // Likely wrong password
+      setWiFiStatus("WiFi disconnected"); // Likely wrong password
     } else {
       wifiStatus = String(wl_status_to_string(WiFi.status()));
     }
     vTaskDelete(NULL);
     return;
   }
-  wifiStatus = "See " + WiFi.localIP().toString();
+  setWiFiStatus("See " + WiFi.localIP().toString());
 
   initBuffer(&inBuffer, 1024);
   initBuffer(&outBuffer, 1024);
@@ -1476,7 +1482,7 @@ String printDupr(long value) {
     }
     result = String(tpi, points);
   }
-  return result + "tpi";
+  return result;
 }
 
 long stepsToDu(Axis* a, long steps) {
@@ -1565,7 +1571,7 @@ bool manualMovesAllowedWhenOn() {
 }
 
 bool manualMovesIgnoredWhenOn() {
-  return mode == MODE_GCODE;
+  return mode == MODE_GCODE || isPassMode();
 }
 
 int getLastSetupIndex() {
@@ -1692,7 +1698,7 @@ String printMode() {
 unsigned long lastDisplayUpdateTime = 0;
 
 void updateDisplay() {
-  if (millis() - lastDisplayUpdateTime < 50) return;
+  if (millis() - lastDisplayUpdateTime < 100) return;
   lastDisplayUpdateTime = millis();
 
   long newHashLine0 = isOn + spindlePosSync + mode + measure + dupr + starts;
@@ -1756,7 +1762,7 @@ void updateDisplay() {
       (mode == MODE_CONE ? round(coneRatio * 10000) : 0) + turnPasses + opIndex + setupIndex + gcodeProgramIndex + gcodeProgramCount + spindleStopped * 3 + (isOn ? 139 : -117) + (inNumpad ? 10 : 0) + (auxForward ? 17 : -31) +
       (z.leftStop == LONG_MAX ? 123 : z.leftStop) + (z.rightStop == LONG_MIN ? 1234 : z.rightStop) +
       (x.leftStop == LONG_MAX ? 1235 : x.leftStop) + (x.rightStop == LONG_MIN ? 123456 : x.rightStop) + gcodeCommandHash +
-      (mode == MODE_Y ? y.pos + y.originPos + (y.leftStop == LONG_MAX ? 123 : y.leftStop) + (y.rightStop == LONG_MIN ? 1234 : y.rightStop) + y.disabled : 0) + x.pos + z.pos;
+      (mode == MODE_Y ? y.pos + y.originPos + (y.leftStop == LONG_MAX ? 123 : y.leftStop) + (y.rightStop == LONG_MIN ? 1234 : y.rightStop) + y.disabled : 0) + x.pos + x.originPos + z.pos;
   if (lcdHashLine3 != newHashLine3) {
     lcdHashLine3 = newHashLine3;
     String result = "";
@@ -1827,7 +1833,9 @@ void updateDisplay() {
 
     if (inNumpad && result == "") result = "Use " + printDupr(numpadToDeciMicrons()) + "?";
 
-    if (result == "") result = wifiStatus;
+    if (result == "" && (millis() - wifiStatusMillis < 7000 || !x.active || x.disabled)) result = wifiStatus;
+
+    if (result == "" && x.active && !x.disabled) result = "Diameter " + printDeciMicrons(abs(2 * getAxisPosDu(&x)), 2);
 
     setText("t3", result);
   }
@@ -2087,7 +2095,10 @@ void taskMoveZ(void *param) {
     z.movingManually = true;
     if (isOn && dupr != 0 && mode == MODE_NORMAL) {
       // Move by moveStep in the desired direction but stay in the thread by possibly traveling a little more.
-      int diff = ceil(moveStep * 1.0 / abs(dupr * starts)) * ENCODER_STEPS_FLOAT * sign * (dupr > 0 ? 1 : -1);
+      float fraction = pulseDelta == 0 ? 1.0 : abs(pulseDelta) / PULSE_PER_REVOLUTION;
+      float turns = moveStep * fraction / abs(dupr * starts);
+      int fullTurns = ceil(turns);
+      int diff = fullTurns * ENCODER_STEPS_FLOAT * sign * (dupr > 0 ? 1 : -1);
       long prevSpindlePos = spindlePos;
       bool resting = false;
       do {
@@ -2110,6 +2121,7 @@ void taskMoveZ(void *param) {
         if (newPos != z.pos) {
           stepToContinuous(&z, newPos);
           waitForPendingPosNear0(&z);
+          getAndResetPulses(&z); // Discard any pulses during movement.
         } else if (z.pos == (left ? z.leftStop : z.rightStop)) {
           // We're standing on a stop with the L/R move button pressed.
           resting = true;
@@ -3194,6 +3206,7 @@ bool processNumpad(int keyCode) {
 const int NEXTION_BUFFER_LENGTH = 256;
 byte nextionBuffer[NEXTION_BUFFER_LENGTH];
 int nextionBufferIndex = 0;
+byte lastNextionPageId = 255;
 
 bool checkForTerminator() {
   if (nextionBufferIndex < 3) return false;
@@ -3203,7 +3216,7 @@ bool checkForTerminator() {
 }
 
 const byte HEX_TO_KEYCODE[256] = {
-  // Array indexes are "id" attribute values in the Nextion h5.hmi
+  // Page 0 array indexes are "id" attribute values in the Nextion h5.hmi
   [0] = 0,
   [1] = 0,
   [2] = 0,
@@ -3258,23 +3271,45 @@ const byte HEX_TO_KEYCODE[256] = {
 };
 
 int processNextionMessage() {
+  lastNextionPageId = 255;
   if (nextionBufferIndex < 6) return 0;
-  if (nextionBuffer[0] == 0x65 && nextionBuffer[1] == 0x01) {
-    if (nextionBuffer[2] == 0x03) {
-      REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-      esp_restart();      
+  if (nextionBuffer[0] == 0x65) {
+    byte pageId = nextionBuffer[1];
+    int code = 0;
+    if (pageId == 0x00) {
+      code = HEX_TO_KEYCODE[nextionBuffer[2]];
+    } else if (pageId == 0x01) {
+      switch (nextionBuffer[2]) {
+        case 12: code = B_MODE_GEARS; break;
+        case 13: code = B_MODE_TURN; break;
+        case 14: code = B_MODE_FACE; break;
+        case 15: code = B_MODE_CONE; break;
+        case 16: code = B_MODE_CUT; break;
+        case 17: code = B_MODE_THREAD; break;
+        case 18: code = B_MODE_ELLIPSE; break;
+        case 19: code = B_MODE_GCODE; break;
+        case 20: code = B_MODE_ASYNC; break;
+        case 21: code = B_MODE_Y; break;
+      }
     }
-  }
-  if (nextionBuffer[0] == 0x65 && nextionBuffer[1] == 0x00) {
-    int code = HEX_TO_KEYCODE[nextionBuffer[2]];
-    if (nextionBuffer[3] == 0) code |= PS2_BREAK;
+    if (code != 0) {
+      lastNextionPageId = pageId;
+      if (nextionBuffer[3] == 0) code |= PS2_BREAK;
+    }
     return code;
   }
   return 0;
 }
 
+void setModeFromUi(int modeToSet, bool eventFromNextion) {
+  setModeFromTask(modeToSet);
+  if (eventFromNextion && lastNextionPageId == 1) toScreen("page 0");
+}
+
 void processKeypadEvent() {
   int event = 0;
+  bool eventFromNextion = false;
+  lastNextionPageId = 255;
   if (wsKeycode != 0) {
     event = wsKeycode;
     wsKeycode = 0;
@@ -3290,6 +3325,7 @@ void processKeypadEvent() {
     }
     if (checkForTerminator()) {
       event = processNextionMessage();
+      eventFromNextion = event != 0 && lastNextionPageId != 255;
       nextionBufferIndex = 0;
     }
   }
@@ -3382,13 +3418,13 @@ void processKeypadEvent() {
   } else if (keyCode == B_STOPB && ACTIVE_Y) {
     buttonRightStopPress(&y);
   } else if (keyCode == B_MODE_Y && ACTIVE_Y) {
-    setModeFromTask(MODE_Y);
+    setModeFromUi(MODE_Y, eventFromNextion);
   } else if (keyCode == B_MODE_ELLIPSE) {
-    setModeFromTask(MODE_ELLIPSE);
+    setModeFromUi(MODE_ELLIPSE, eventFromNextion);
   } else if (keyCode == B_MODE_GCODE) {
-    setModeFromTask(MODE_GCODE);
+    setModeFromUi(MODE_GCODE, eventFromNextion);
   } else if (keyCode == B_MODE_ASYNC) {
-    setModeFromTask(MODE_ASYNC);
+    setModeFromUi(MODE_ASYNC, eventFromNextion);
   } else if (keyCode == B_MULTISTART) {
     buttonMultistartPress();
   } else if (keyCode == B_DISPL) {
@@ -3417,11 +3453,12 @@ void processKeypadEvent() {
   } else if (keyCode == B_MEASURE) {
     buttonMeasurePress();
   } else if (keyCode == B_MODE_GEARS) {
-    setModeFromTask(MODE_NORMAL);
+    setModeFromUi(MODE_NORMAL, eventFromNextion);
   } else if (keyCode == B_MODE_TURN) {
-    setModeFromTask(MODE_TURN);
+    setModeFromUi(MODE_TURN, eventFromNextion);
   } else if (keyCode == B_MODE) {
-    if (mode == MODE_NORMAL) setModeFromTask(MODE_TURN);
+    if (eventFromNextion) toScreen("page 1");
+    else if (mode == MODE_NORMAL) setModeFromTask(MODE_TURN);
     else if (mode == MODE_TURN) setModeFromTask(MODE_FACE);
     else if (mode == MODE_FACE) setModeFromTask(MODE_CONE);
     else if (mode == MODE_CONE) setModeFromTask(MODE_CUT);
@@ -3432,13 +3469,13 @@ void processKeypadEvent() {
     else if (mode == MODE_ASYNC) setModeFromTask(y.active ? MODE_Y : MODE_NORMAL);
     else if (mode == MODE_Y) setModeFromTask(MODE_NORMAL);
   } else if (keyCode == B_MODE_FACE) {
-    setModeFromTask(MODE_FACE);
+    setModeFromUi(MODE_FACE, eventFromNextion);
   } else if (keyCode == B_MODE_CONE) {
-    setModeFromTask(MODE_CONE);
+    setModeFromUi(MODE_CONE, eventFromNextion);
   } else if (keyCode == B_MODE_CUT) {
-    setModeFromTask(MODE_CUT);
+    setModeFromUi(MODE_CUT, eventFromNextion);
   } else if (keyCode == B_MODE_THREAD) {
-    setModeFromTask(MODE_THREAD);
+    setModeFromUi(MODE_THREAD, eventFromNextion);
   }
 }
 
@@ -3571,8 +3608,8 @@ void modeTurn(Axis* main, Axis* aux) {
   long auxEndStop = auxForward ? aux->leftStop : aux->rightStop;
 
   // opIndex 0 is only executed once, do setup calculations here.
+  auxSafeDistance = (auxForward ? -1 : 1) * SAFE_DISTANCE_DU * aux->motorSteps / aux->screwPitch;
   if (opIndex == 0) {
-    auxSafeDistance = (auxForward ? -1 : 1) * SAFE_DISTANCE_DU * aux->motorSteps / aux->screwPitch;
     startOffset = starts == 1 ? 0 : round(ENCODER_STEPS_FLOAT / starts);
 
     // Move to right-bottom limit.
@@ -3593,7 +3630,9 @@ void modeTurn(Axis* main, Axis* aux) {
       opIndexAdvanceFlag = false;
       opIndex += starts;
     }
-    long auxPos = auxEndStop - (auxEndStop - auxStartStop) / turnPasses * (turnPasses - ceil(opIndex / float(starts)));
+    float fraction = (turnPasses - ceil(opIndex / float(starts))) / turnPasses;
+    if (mode == MODE_THREAD) fraction = fraction * fraction; // make initial passed larger, final passes smaller
+    long auxPos = auxEndStop - (auxEndStop - auxStartStop) * fraction;
     // Bringing X to starting position.
     if (opSubIndex == 0) {
       stepToFinal(aux, auxPos);
@@ -3632,9 +3671,9 @@ void modeTurn(Axis* main, Axis* aux) {
     }
     // Retracting the tool
     if (opSubIndex == 3) {
-      long auxPos = auxStartStop + auxSafeDistance;
-      stepToFinal(aux, auxPos);
-      if (aux->pos == auxPos) {
+      long auxTargetPos = (mode == MODE_THREAD ? auxStartStop : auxPos) + auxSafeDistance;
+      stepToFinal(aux, auxTargetPos);
+      if (aux->pos == auxTargetPos) {
         opSubIndex = 4;
       }
     }
